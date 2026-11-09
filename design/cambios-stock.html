@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Cambios de stock</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "cambios-stock",
+  nombre: "Cambios de stock",
+  titulo: "Cambios de stock y de precio",
+  pregunta: "¿Qué lote se vendió o cambió de precio?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+  fuentes: ["AXION"],
+
+  _datos: null,
+  _pedido: false,
+  _error: "",
+  _dias: 7,
+
+  PILLS: [[1, "Hoy"], [7, "7 días"], [30, "30 días"], [0, "Todo el registro"]],
+  ESTADO: {LIBRE: "Libre", VENDIDO: "Vendido", SEPARADO: "Separado", BLOQUEADO: "Bloqueado"},
+  CONTEO: {LIBRE: ["libre", "libres"], VENDIDO: ["vendida", "vendidas"],
+           SEPARADO: ["separada", "separadas"], BLOQUEADO: ["bloqueada", "bloqueadas"]},
+  _cuenta: function (k, n) {
+    var c = this.CONTEO[k];
+    return ent(n) + " " + (c ? (n === 1 ? c[0] : c[1]) : String(k).toLowerCase());
+  },
+
+  _pedir: function () {
+    var self = this;
+    this._pedido = true;
+    fetch("/cambios-inventario", {cache: "no-store"})
+      .then(function (r) {
+        if (r.status === 403) throw new Error("esta cuenta no ve esta hoja");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (j) {
+        self._datos = j; self._error = "";
+        if (window.HOJA === self) pintar();
+      })
+      .catch(function (e) {
+        self._error = (e && e.message) || String(e);
+        if (window.HOJA === self) pintar();
+      });
+  },
+
+  _est: function (e) { return e ? (this.ESTADO[e] || (e.charAt(0) + e.slice(1).toLowerCase())) : "—"; },
+
+  /* los cambios dentro de la ventana elegida, contados desde la última lectura */
+  _eventos: function () {
+    var d = this._datos || {}, ev = (d.eventos || []).slice();
+    if (this._dias && d.ultima) {
+      var ref = new Date(d.ultima.slice(0, 10) + "T00:00:00Z");
+      ref.setUTCDate(ref.getUTCDate() - (this._dias - 1));
+      var corte = ref.toISOString().slice(0, 10);
+      ev = ev.filter(function (e) { return e.t.slice(0, 10) >= corte; });
+    }
+    return ev.sort(function (a, b) {
+      return a.t < b.t ? 1 : (a.t > b.t ? -1 : ((a.p + a.u) < (b.p + b.u) ? -1 : 1));
+    });
+  },
+
+  _cambio: function (e) {
+    if (e.k === "estado") {
+      if (e.a === "LIBRE") return "Salió del stock";
+      if (e.d === "LIBRE") return "Volvió al stock";
+      return "Cambió de estado";
+    }
+    if (e.k === "precio") return e.d > e.a ? "Subió el precio" : "Bajó el precio";
+    if (e.k === "precio_carga") return "Se cargó el precio";
+    if (e.k === "precio_quita") return "Se quitó el precio";
+    if (e.k === "alta") return "Unidad nueva en AXION";
+    return "Unidad borrada de AXION";
+  },
+
+  _carta: function (chip, pregunta, cifra, exacta) {
+    return '<div class="d-carta"><div class="d-cab"><span class="d-chip">' + chip + '</span>' +
+      '<span class="d-preg">' + esc(pregunta) + '</span></div>' +
+      '<div class="d-cifra">' + cifra + '</div><div class="d-exacta">' + exacta + '</div></div>';
+  },
+
+  _tabla: function (titulo, cols, filas, total) {
+    var NE = "No existe";
+    var cls = function (c, i) { return (i === 0 ? 'obra' : (c.num ? 'num' : '')) + (c.nw ? ' nw' : ''); };
+    var t = '<div class="tarjeta" style="margin-bottom:14px"><span class="overline">' + esc(titulo) + '</span>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      cols.map(function (c) { return '<th' + (c.num ? ' class="num"' : '') + '>' + esc(c.rot) + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    if (!filas.length) {
+      t += '<tr>' + cols.map(function (c, i) { return '<td class="' + cls(c, i) + '">' + NE + '</td>'; }).join('') + '</tr>';
+    }
+    filas.forEach(function (f) {
+      t += '<tr>' + f.map(function (v, i) { return '<td class="' + cls(cols[i], i) + '">' + v + '</td>'; }).join('') + '</tr>';
+    });
+    if (total && filas.length) {
+      t += '<tr class="total">' + total.map(function (v, i) { return '<td class="' + cls(cols[i], i) + '">' + v + '</td>'; }).join('') + '</tr>';
+    }
+    return t + '</tbody></table></div></div>';
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    if (!this._pedido) this._pedir();
+    var d = this._datos || {}, NE = "No existe";
+    if (!d.hay) {
+      return '<div class="d-lienzo">' + this._tabla("Cambios de stock y de precio",
+        [{rot: "Cambios"}, {rot: "Dato", num: true}], []) + '</div>';
+    }
+    var ev = this._eventos();
+    var sale = ev.filter(function (e) { return e.k === "estado" && e.a === "LIBRE"; });
+    var vuelve = ev.filter(function (e) { return e.k === "estado" && e.d === "LIBRE" && e.a !== "LIBRE"; });
+    var sube = ev.filter(function (e) { return e.k === "precio" && e.d > e.a; });
+    var baja = ev.filter(function (e) { return e.k === "precio" && e.d < e.a; });
+    var suma = function (l) { return l.reduce(function (s, e) { return s + Math.abs(e.d - e.a); }, 0); };
+    var porEstado = {};
+    sale.forEach(function (e) { porEstado[e.d] = (porEstado[e.d] || 0) + 1; });
+    var detSale = Object.keys(porEstado).map(function (k) { return self._cuenta(k, porEstado[k]); }).join(' · ');
+
+    var h = '<div class="d-lienzo">' +
+      '<div class="pills-emp" id="cs-dias" style="margin:0 0 10px">' +
+      this.PILLS.map(function (p) {
+        return '<button class="pill-emp' + (self._dias === p[0] ? ' activa' : '') + '" data-cs-dias="' + p[0] +
+          '" type="button">' + esc(p[1]) + '</button>'; }).join('') + '</div>' +
+      '<div class="d-sub" style="margin:0 0 14px">Registro desde ' + esc(d.base || NE) + ' · última lectura ' +
+      esc(d.ultima || NE) + ' · ' + ent(d.unidades) + ' unidades · ' +
+      ["LIBRE", "VENDIDO", "SEPARADO", "BLOQUEADO"].filter(function (k) { return (d.estados || {})[k]; })
+        .map(function (k) { return self._cuenta(k, d.estados[k]); }).join(' · ') +
+      '</div>' +
+      '<div class="d-kpis">' +
+      this._carta('⇢', '¿Cuántas unidades dejaron de estar libres?', ent(sale.length), esc(detSale || NE)) +
+      this._carta('⇠', '¿Cuántas volvieron a estar libres?', ent(vuelve.length), esc(vuelve.length ? 'volvieron al stock' : NE)) +
+      this._carta('↗', '¿Cuántos precios subieron?', ent(sube.length), sube.length ? 'suman ' + soles(suma(sube)) + ' de subida' : esc(NE)) +
+      this._carta('↘', '¿Cuántos precios bajaron?', ent(baja.length), baja.length ? 'suman ' + soles(suma(baja)) + ' de baja' : esc(NE)) +
+      '</div>';
+
+    h += this._tabla("Cambios registrados",
+      [{rot: "Fecha y hora", nw: true}, {rot: "Proyecto"}, {rot: "Unidad"}, {rot: "Cambio"},
+       {rot: "Antes", num: true}, {rot: "Después", num: true}, {rot: "Diferencia", num: true}],
+      ev.map(function (e) {
+        var esPrecio = e.k.indexOf("precio") === 0;
+        var antes = esPrecio ? (e.a === null ? '—' : soles(e.a)) : self._est(e.a);
+        var desp = esPrecio ? (e.d === null ? '—' : soles(e.d)) : self._est(e.d);
+        var dif = '—';
+        if (e.k === "precio") {
+          var x = e.d - e.a;
+          dif = (x > 0 ? '+' : '−') + soles(Math.abs(x)).replace('S/ ', 'S/ ') +
+            ' (' + (x > 0 ? '+' : '−') + Math.abs(100 * x / e.a).toFixed(1) + '%)';
+        }
+        return [esc(e.t), esc(e.p), esc(e.u), esc(self._cambio(e)), antes, desp, dif];
+      }));
+
+    var ventas = d.ventas || [];
+    h += this._tabla("Ventas por fecha de venta · últimos 30 días · AXION",
+      [{rot: "Fecha de venta", nw: true}, {rot: "Proyecto"}, {rot: "Unidad"}, {rot: "Precio", num: true}],
+      ventas.map(function (v) { return [esc(v[0]), esc(v[1]), esc(v[2]), v[3] === null ? '—' : soles(v[3])]; }),
+      ['TOTAL · ' + ent(ventas.length) + (ventas.length === 1 ? ' venta' : ' ventas'), '', '',
+       soles(ventas.reduce(function (s, v) { return s + (v[3] || 0); }, 0))]);
+    return h + '</div>';
+  },
+
+  conectar: function () {
+    var self = this, p = document.getElementById("cs-dias");
+    if (p) p.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".pill-emp") : null;
+      if (!b) return;
+      self._dias = Number(b.getAttribute("data-cs-dias"));
+      pintar();
+    });
+  }
+};
+</script>
+</body>
+</html>

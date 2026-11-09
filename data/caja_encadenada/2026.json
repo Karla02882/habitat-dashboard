@@ -1,0 +1,86 @@
+{
+ "anio": 2026,
+ "fuente": "Excel de Administración 2025 y 2026 (celdas «QUEDA EN CAJA») + Libro Mayor Caja Huancayo (4 CMAC) + el cierre de agosto pasado el 01-set (config/saldos_externos.json)",
+ "libro_generado": "2026-08-28",
+ "arranque": {
+  "administracion": 20914.47,
+  "cmac": 1070719.8,
+  "total": 1091634.27,
+  "cuentas": 7,
+  "fuente": "cierre de diciembre 2025 · Excel de Administración (3 cuadros «QUEDA EN CAJA») + fila «Apertura» de las 4 CMAC en el Libro Mayor"
+ },
+ "meses": {
+  "1": {
+   "mes": 1,
+   "nombre": "Enero",
+   "administracion": 75504.09,
+   "cmac": 232000.16,
+   "real": 307504.25,
+   "cuentas": 7,
+   "fuente": "Excel de Administración (3 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de enero)"
+  },
+  "2": {
+   "mes": 2,
+   "nombre": "Febrero",
+   "administracion": 169467.63,
+   "cmac": 81708.98,
+   "real": 251176.61,
+   "cuentas": 7,
+   "fuente": "Excel de Administración (3 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de febrero)"
+  },
+  "3": {
+   "mes": 3,
+   "nombre": "Marzo",
+   "administracion": 412203.45,
+   "cmac": 126448.69,
+   "real": 538652.14,
+   "cuentas": 8,
+   "fuente": "Excel de Administración (4 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de marzo)"
+  },
+  "4": {
+   "mes": 4,
+   "nombre": "Abril",
+   "administracion": 255474.62,
+   "cmac": 178203.01,
+   "real": 433677.63,
+   "cuentas": 8,
+   "fuente": "Excel de Administración (4 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de abril)"
+  },
+  "5": {
+   "mes": 5,
+   "nombre": "Mayo",
+   "administracion": 574385.77,
+   "cmac": 267141.97,
+   "real": 841527.74,
+   "cuentas": 9,
+   "fuente": "Excel de Administración (5 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de mayo)"
+  },
+  "6": {
+   "mes": 6,
+   "nombre": "Junio",
+   "administracion": 659652.26,
+   "cmac": 718141.5,
+   "real": 1377793.76,
+   "cuentas": 9,
+   "fuente": "Excel de Administración (5 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de junio)"
+  },
+  "7": {
+   "mes": 7,
+   "nombre": "Julio",
+   "administracion": 480826.24,
+   "cmac": 745143.64,
+   "real": 1225969.88,
+   "cuentas": 9,
+   "fuente": "Excel de Administración (5 cuadros) + Libro Mayor Caja Huancayo (4 CMAC, cierre de julio)"
+  },
+  "8": {
+   "mes": 8,
+   "nombre": "Agosto",
+   "administracion": 398771.22,
+   "cmac": 737183.26,
+   "real": 1135954.48,
+   "cuentas": 10,
+   "fuente": "cierre al 31-ago que pasó Administración el 01-set (4 CMAC del banco + 5 BCP/BBVA según AXION) + el efectivo de su Excel al 28-ago"
+  }
+ }
+}

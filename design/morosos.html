@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Morosos</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "morosos",
+  nombre: "Morosos",
+  titulo: "Morosos de AXION",
+  pregunta: "¿Quién debe y desde cuándo?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+  fuentes: ["AXION"],
+
+  _datos: null,
+  _pedido: false,
+  _marca: null,
+  _error: "",
+  _busca: "",
+  _tipo: "Lotes",
+  _proyecto: "",
+  _asesor: "",
+  _mora: "",
+  _editando: null,
+  _borrador: "",
+  _guardando: false,
+  _errCom: "",
+
+  TRAMOS: [["", "Todos"], ["1-30", "1 a 30 días"], ["31-90", "31 a 90 días"],
+           ["91+", "Más de 90 días"]],
+
+  _pedir: function () {
+    var self = this;
+    this._pedido = true;
+    fetch("/morosos", {cache: "no-store"})
+      .then(function (r) {
+        if (r.status === 403) throw new Error("esta cuenta no ve esta hoja");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (j) {
+        self._datos = j; self._error = "";
+        if (window.HOJA === self) pintar();
+      })
+      .catch(function (e) {
+        self._error = (e && e.message) || String(e);
+        if (window.HOJA === self) pintar();
+      });
+  },
+
+  _norm: function (s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+  },
+  _fdm: function (s) {
+    var p = String(s || "").split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0].slice(2) : String(s || "");
+  },
+  _enTramo: function (d, t) {
+    if (!t) return true;
+    if (t === "1-30") return d >= 1 && d <= 30;
+    if (t === "31-90") return d >= 31 && d <= 90;
+    return d > 90;
+  },
+  _coms: function (r) {
+    return ((this._datos || {}).comentarios || {})[r.id] || [];
+  },
+
+  _cancelado: function (r) { return !!r.estado && r.estado !== "activo"; },
+  _cancelados: function () {
+    var self = this;
+    return ((this._datos || {}).filas || []).filter(function (r) { return self._cancelado(r); });
+  },
+
+  _base: function (sin) {
+    var self = this, q = this._norm(this._busca.trim()), dig = this._busca.replace(/\D/g, "");
+    return ((this._datos || {}).filas || []).filter(function (r) {
+      if (self._cancelado(r)) return false;
+      if (sin !== "tipo" && self._tipo && r.tipo !== self._tipo) return false;
+      if (sin !== "proyecto" && self._proyecto && r.proyecto !== self._proyecto) return false;
+      if (sin !== "asesor" && self._asesor && r.asesor !== self._asesor) return false;
+      if (sin !== "mora" && !self._enTramo(r.dias, self._mora)) return false;
+      if (q) {
+        if (dig.length >= 4 && String(r.marcar || "").replace(/\D/g, "").indexOf(dig) >= 0) return true;
+        return self._norm([r.cliente, r.proyecto, r.unidad, r.asesor].join(" ")).indexOf(q) >= 0;
+      }
+      return true;
+    });
+  },
+
+  _opciones: function (filas, campo, elegido, todos) {
+    var cu = {};
+    filas.forEach(function (r) { cu[r[campo]] = (cu[r[campo]] || 0) + 1; });
+    if (elegido && !cu[elegido]) cu[elegido] = 0;
+    var act = (campo === "asesor" && typeof D !== "undefined" && D) ? (D.asesores_activos || []) : [];
+    var inact = function (k) { return act.length && k !== "(sin asesor)" && act.indexOf(k) < 0; };
+    return '<option value="">' + todos + '</option>' +
+      Object.keys(cu).sort(function (a, b) {
+        return (inact(a) - inact(b)) || a.localeCompare(b, "es"); }).map(function (k) {
+        return '<option value="' + esc(k) + '"' + (k === elegido ? ' selected' : '') + '>' +
+          esc(k) + ' · ' + ent(cu[k]) + (inact(k) ? ' · inactivo' : '') + '</option>';
+      }).join('');
+  },
+
+  _telHtml: function (r) {
+    if (!r.tel) return '<span class="ob-sub">sin teléfono</span>';
+    return '<a class="cl-tel" href="tel:' + esc(r.marcar) + '">' + esc(r.tel) + '</a>' +
+      (r.wa ? ' <a class="cl-wa" href="https://wa.me/' + esc(r.wa) +
+        '" target="_blank" rel="noopener">WhatsApp</a>' : '');
+  },
+
+  _celdaCom: function (r, editable) {
+    var self = this, cs = this._coms(r).slice().reverse();
+    var h = '<div class="mo-com">';
+    if (!cs.length && !editable) h += 'No existe';
+    cs.forEach(function (c) {
+      h += '<div class="mo-nota">' + esc(c.texto) + '<span class="ob-sub"> · ' +
+        esc(c.autor) + ' · <span style="white-space:nowrap">' + esc(c.fecha) + '</span></span></div>';
+    });
+    if (editable) {
+      if (this._editando === r.id) {
+        h += '<textarea class="mo-txt" id="mo-txt" maxlength="1000">' + esc(this._borrador) +
+          '</textarea><div class="mo-btns">' +
+          '<button type="button" class="pill-emp activa" data-mo-guardar="' + esc(r.id) + '"' +
+          (this._guardando ? ' disabled' : '') + '>Guardar</button>' +
+          '<button type="button" class="pill-emp" data-mo-cancelar="1">Cancelar</button></div>' +
+          (this._errCom ? '<div class="mo-err">' + esc(this._errCom) + '</div>' : '');
+      } else {
+        h += '<div class="mo-btns"><button type="button" class="pill-emp" data-mo-escribir="' +
+          esc(r.id) + '">Escribir</button></div>';
+      }
+    }
+    return h + '</div>';
+  },
+
+  _tabla: function (filas, editable) {
+    var self = this, NE = "No existe";
+    var h = '<div class="envoltura-tabla"><table class="datos cl-tabla"><thead><tr>' +
+      '<th>Cliente</th><th>Proyecto · unidad</th><th>Asesor</th>' +
+      '<th class="num">Mora</th><th class="num">Vencido</th><th>Nota en AXION</th>' +
+      '<th>Gestión</th></tr></thead><tbody>';
+    if (!filas.length) {
+      return h + '<tr><td class="obra">' + NE + '</td><td>' + NE + '</td><td>' + NE +
+        '</td><td class="num">' + NE + '</td><td class="num">' + NE + '</td><td>' + NE +
+        '</td><td>' + NE + '</td></tr></tbody></table></div>';
+    }
+    var tv = 0, ts = 0, tc = 0;
+    filas.forEach(function (r) {
+      tv += r.vencido; ts += r.saldo; tc += r.cuotas;
+      h += '<tr><td class="obra"><span data-literal="nombre tal como está en AXION">' +
+        esc(r.cliente) + '</span><span class="ob-sub"> · ' + self._telHtml(r) +
+        (r.estado && r.estado !== "activo" ? ' · crédito ' + esc(r.estado) + ' · Cobranzas' : '') +
+        '</span></td>' +
+        '<td>' + esc(r.proyecto) + '<span class="ob-sub"> · ' + esc(r.unidad || NE) + '</span></td>' +
+        '<td>' + esc(r.asesor) + '</td>' +
+        '<td class="num" data-orden="' + r.dias + '"' + (r.dias > 90 ? ' style="color:var(--rojo)"' : '') +
+        '>' + ent(r.dias) + ' d<span class="ob-sub" style="white-space:normal"> · desde ' +
+        esc(self._fdm(r.desde)) + ' · ' +
+        ent(r.cuotas) + (r.cuotas === 1 ? ' cuota' : ' cuotas') + ' · prórroga: ' +
+        (r.prorroga ? esc(r.prorroga) : NE) + '</span></td>' +
+        '<td class="num" data-orden="' + r.vencido + '">' + soles(r.vencido) +
+        '<span class="ob-sub"> · saldo ' + soles(r.saldo) + '</span></td>' +
+        '<td>' + (r.nota_axion ? esc(r.nota_axion) : NE) + '</td>' +
+        '<td>' + self._celdaCom(r, editable) + '</td></tr>';
+    });
+    return h + '<tr class="total"><td class="obra">TOTAL · ' + ent(filas.length) +
+      (filas.length === 1 ? ' crédito' : ' créditos') + '</td><td></td><td></td>' +
+      '<td class="num">' + ent(tc) + ' cuotas</td><td class="num">' + soles(tv) +
+      '<span class="ob-sub"> · saldo ' + soles(ts) + '</span></td><td></td><td></td></tr>' +
+      '</tbody></table></div>';
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var marca = (typeof D !== "undefined" && D) ? String(D.publicado || D.generado || "") : "";
+    if (!this._pedido || this._marca !== marca) { this._marca = marca; this._pedir(); }
+    var caja = function (txt) {
+      return '<div class="d-lienzo"><div class="d-carta"><span class="overline">Morosos</span>' +
+        '<p class="mas">' + esc(txt) + '</p></div></div>';
+    };
+    if (this._error) return caja(this._error);
+    var C = this._datos;
+    if (!C) return caja("cargando la lista de AXION…");
+    if (!C.filas) return caja(C.motivo || "sin lista de morosos");
+
+    var base = this._base();
+    var h = '<div class="d-lienzo">';
+    h += '<div class="st-barra">' +
+      '<label class="st-campo">Buscar<input id="mo-busca" type="search" ' +
+        'placeholder="cliente, teléfono, lote…" value="' + esc(this._busca) + '"></label>' +
+      '<label class="st-campo">Tipo<select id="mo-tipo" class="cl-sel">' +
+        this._opciones(this._base("tipo"), "tipo", this._tipo, "Todos") + '</select></label>' +
+      '<label class="st-campo">Proyecto<select id="mo-proyecto" class="cl-sel">' +
+        this._opciones(this._base("proyecto"), "proyecto", this._proyecto, "Todos") + '</select></label>' +
+      '<label class="st-campo">Asesor<select id="mo-asesor" class="cl-sel">' +
+        this._opciones(this._base("asesor"), "asesor", this._asesor, "Todos") + '</select></label>' +
+      '<label class="st-campo">Mora<select id="mo-mora" class="cl-sel">' +
+        this.TRAMOS.map(function (t) {
+          return '<option value="' + t[0] + '"' + (t[0] === self._mora ? ' selected' : '') + '>' +
+            esc(t[1]) + '</option>';
+        }).join('') + '</select></label>' +
+      '<span class="cl-meta">AXION al ' + esc(C.generado) + '</span></div>';
+
+    var venc = 0, saldo = 0, cuotas = 0, m90 = [], sinG = [];
+    base.forEach(function (r) {
+      venc += r.vencido; saldo += r.saldo; cuotas += r.cuotas;
+      if (r.dias > 90) m90.push(r);
+      if (!self._coms(r).length) sinG.push(r);
+    });
+    var v90 = 0;
+    m90.forEach(function (r) { v90 += r.vencido; });
+    var carta = function (id, chip, preg, cifra, exacta, pie, rojo) {
+      return '<div class="d-carta d-abrible abrible" data-abre="' + id +
+        '" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">' + chip + '</span><span class="d-preg">' +
+        preg + '</span></div><div class="d-cifra"' + (rojo ? ' style="color:var(--rojo)"' : '') +
+        '>' + cifra + '</div><div class="d-exacta">' + exacta + '</div>' +
+        '<div class="d-pie">' + pie + '</div></div>';
+    };
+    h += '<div class="rejilla-4" style="margin-bottom:var(--e4)">' +
+      carta("mo-c-proy", "⏰", "¿Cuánto está vencido?", solesM(venc),
+            soles(venc) + ' · ' + ent(cuotas) + ' cuotas', 'saldo de esos créditos ' + solesM(saldo),
+            venc > 0) +
+      carta("mo-c-asesor", "☎", "¿Cuántos deben?", ent(base.length),
+            base.length === 1 ? 'crédito con cuotas vencidas' : 'créditos con cuotas vencidas',
+            'por asesor', false) +
+      carta("mo-c-90", "!", "Más de 90 días", ent(m90.length),
+            soles(v90) + ' vencido', 'desde la cuota más antigua', m90.length > 0) +
+      carta("mo-c-sin", "✎", "Sin gestión escrita", ent(sinG.length),
+            'de ' + ent(base.length) + ' créditos', 'nadie escribió en el cockpit', false) +
+      '</div>';
+    ["mo-c-proy", "mo-c-asesor", "mo-c-90", "mo-c-sin"].forEach(function (id) {
+      h += '<div class="detalle" id="det-' + id + '"></div>';
+    });
+
+    h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">Morosos · ' +
+      esc(this._tipo || "todos los tipos") + '</h3>' +
+      this._tabla(base, C.puede_escribir !== false) + '</div>';
+
+
+    return h + '</div>';
+  },
+
+  detalle: function (id) {
+    id = String(id);
+    if (id.indexOf("mo-c-") !== 0 || !this._datos || !this._datos.filas) return null;
+    var self = this, base = this._base(), t = '<button class="cerrar">Cerrar</button>';
+    var agrupa = function (campo, titulo, rot) {
+      var g = {};
+      base.forEach(function (r) {
+        var x = g[r[campo]] || (g[r[campo]] = {n: 0, c: 0, v: 0, s: 0, d: 0});
+        x.n++; x.c += r.cuotas; x.v += r.vencido; x.s += r.saldo; x.d = Math.max(x.d, r.dias);
+      });
+      var ks = Object.keys(g).sort(function (a, b) { return g[b].v - g[a].v; });
+      var h = t + '<h3>' + titulo + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>' + rot + '</th><th class="num">Créditos</th><th class="num">Cuotas</th>' +
+        '<th class="num">Vencido</th><th class="num">Saldo</th><th class="num">Mora más larga</th>' +
+        '</tr></thead><tbody>';
+      if (!ks.length) return h + '<tr><td class="obra">No existe</td><td class="num">No existe</td>' +
+        '<td class="num">No existe</td><td class="num">No existe</td><td class="num">No existe</td>' +
+        '<td class="num">No existe</td></tr></tbody></table></div>';
+      var T = {n: 0, c: 0, v: 0, s: 0};
+      ks.forEach(function (k) {
+        var x = g[k];
+        T.n += x.n; T.c += x.c; T.v += x.v; T.s += x.s;
+        h += '<tr><td class="obra">' + esc(k) + '</td><td class="num">' + ent(x.n) + '</td>' +
+          '<td class="num">' + ent(x.c) + '</td><td class="num">' + soles(x.v) + '</td>' +
+          '<td class="num">' + soles(x.s) + '</td><td class="num">' + ent(x.d) + ' d</td></tr>';
+      });
+      return h + '<tr class="total"><td class="obra">TOTAL</td><td class="num">' + ent(T.n) +
+        '</td><td class="num">' + ent(T.c) + '</td><td class="num">' + soles(T.v) +
+        '</td><td class="num">' + soles(T.s) + '</td><td></td></tr></tbody></table></div>';
+    };
+    if (id === "mo-c-proy") return agrupa("proyecto", "Vencido por proyecto", "Proyecto");
+    if (id === "mo-c-asesor") return agrupa("asesor", "Morosos por asesor", "Asesor");
+    if (id === "mo-c-90") {
+      return t + '<h3>Más de 90 días de mora</h3>' +
+        this._tabla(base.filter(function (r) { return r.dias > 90; }), false);
+    }
+    if (id === "mo-c-sin") {
+      return t + '<h3>Sin gestión escrita</h3>' +
+        this._tabla(base.filter(function (r) { return !self._coms(r).length; }), false);
+    }
+    return null;
+  },
+
+  _guardar: function (cid) {
+    var self = this, texto = String(this._borrador || "").trim();
+    if (!texto) { this._errCom = "el comentario está vacío"; pintar(); return; }
+    this._guardando = true; this._errCom = "";
+    pintar();
+    fetch("/morosos/comentario", {
+      method: "POST", cache: "no-store",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: cid, texto: texto})
+    }).then(function (r) {
+      if (r.status === 403) throw new Error("esta cuenta no puede escribir aquí");
+      if (!r.ok) throw new Error("no se guardó (HTTP " + r.status + ")");
+      return r.json();
+    }).then(function (j) {
+      var C = self._datos;
+      C.comentarios = C.comentarios || {};
+      C.comentarios[j.id] = j.comentarios;
+      self._editando = null; self._borrador = ""; self._guardando = false;
+      if (window.HOJA === self) pintar();
+    }).catch(function (e) {
+      self._guardando = false;
+      self._errCom = (e && e.message) || String(e);
+      if (window.HOJA === self) pintar();
+    });
+  },
+
+  conectar: function () {
+    var self = this;
+    var b = document.getElementById("mo-busca");
+    if (b) {
+      b.addEventListener("input", function () {
+        self._busca = b.value;
+        var pos = b.selectionStart;
+        pintar();
+        var n = document.getElementById("mo-busca");
+        if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+    ["tipo", "proyecto", "asesor", "mora"].forEach(function (q) {
+      var s = document.getElementById("mo-" + q);
+      if (s) s.addEventListener("change", function () { self["_" + q] = s.value; pintar(); });
+    });
+    var tx = document.getElementById("mo-txt");
+    if (tx) {
+      tx.addEventListener("input", function () { self._borrador = tx.value; });
+      if (!self._guardando) {
+        tx.focus();
+        try { tx.setSelectionRange(tx.value.length, tx.value.length); } catch (e) {}
+      }
+    }
+    document.querySelectorAll("[data-mo-escribir]").forEach(function (x) {
+      x.addEventListener("click", function () {
+        self._editando = x.getAttribute("data-mo-escribir");
+        self._borrador = ""; self._errCom = "";
+        pintar();
+      });
+    });
+    document.querySelectorAll("[data-mo-cancelar]").forEach(function (x) {
+      x.addEventListener("click", function () {
+        self._editando = null; self._borrador = ""; self._errCom = "";
+        pintar();
+      });
+    });
+    document.querySelectorAll("[data-mo-guardar]").forEach(function (x) {
+      x.addEventListener("click", function () {
+        if (!x.disabled) self._guardar(x.getAttribute("data-mo-guardar"));
+      });
+    });
+  }
+};
+</script>
+</body>
+</html>

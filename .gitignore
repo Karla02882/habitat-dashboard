@@ -1,0 +1,30 @@
+# Entorno
+venv/
+__pycache__/
+*.pyc
+.env
+secretos/
+
+# Datos generados
+data/*
+!data/.gitkeep
+!data/raw_exports/
+data/raw_exports/*
+!data/raw_exports/cronogramas/
+data/raw_exports/cronogramas/*
+!data/raw_exports/cronogramas/*.xlsx
+!data/ventas_contadora/
+data/ventas_contadora/*
+!data/ventas_contadora/*.json
+!data/caja_encadenada/
+data/caja_encadenada/*
+!data/caja_encadenada/*.json
+
+# Salidas del generador
+tablero.html
+tablero_datos.json
+tablero_revision.html
+stock_datos.json
+finanzas_datos.json
+obras_datos.json
+ventas_datos.json

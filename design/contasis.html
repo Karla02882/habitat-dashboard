@@ -1,0 +1,1852 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ContaSis · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "contasis",
+  nombre: "ContaSis",
+  pregunta: "¿Cómo les fue a las cuatro empresas según el contador?",
+  fuentes: ["CONTASIS"],
+  sinRazonObra: true,
+  sinPeriodo: true,
+
+
+  _tab: null,
+  _mesSel: null,
+  _emp: "20605163557",
+  _kpis: null,
+  _kpisC: null,
+  _M: null, _D: null,
+
+  _RAT: [
+    ["liquidez", "Liquidez corriente", "x", "💧"],
+    ["prueba_acida", "Prueba ácida", "x", "🧪"],
+    ["endeudamiento", "Endeudamiento", "x", "⚖"],
+    ["roe", "ROE", "%", "📈"]
+  ],
+  _IND: [
+    ["flujo", "Flujo del mes", "S", "⇅"],
+    ["variacion", "Variación de la caja", "%", "📊"],
+    ["cobros_salidas", "Cobros ÷ salidas", "%", "⇄"],
+    ["gastos_cobros", "Gastos ÷ cobros", "%", "🧾"],
+    ["grupo_salidas", "Enviado al grupo ÷ salidas", "%", "🏢"],
+    ["meses_caja", "Meses de caja", "m", "🏦"]
+  ],
+  _CORTO: {
+    "Entradas del mes": "entró", "Salidas del mes": "salió",
+    "Saldo inicial": "inicial", "Saldo final": "final",
+    "Cobros de clientes (cuentas 12 y 13)": "cobros",
+    "Gastos (cuentas 60 a 68)": "gastos",
+    "Enviado a empresas del grupo y al socio": "al grupo y al socio"
+  },
+  _EMPS: [
+    ["20608888188", "CONSTRUCTORA VELASCO LEON S.A.C."],
+    ["20607720224", "CORPORACION HABITAT S.A.C."],
+    ["20611216565", "ESCALAR Y HABITAT GRUPO INMOBILIARIO S.A.C."],
+    ["20605163557", "HABITAT BIENES RAICES E.I.R.L."]
+  ],
+  _MESN: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+          "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"],
+
+  _mesTxt: function (k) {
+    var m = /^(\d{4})-(\d{2})$/.exec(String(k || ""));
+    return m ? this._MESN[Number(m[2]) - 1] + " " + m[1] : String(k || "");
+  },
+  _pad: function (n) { return (n < 10 ? "0" : "") + n; },
+
+  _fmt: function (v, u) {
+    if (v === null || v === undefined || isNaN(v)) return "—";
+    if (u === "%") return fmt1(v) + "%";
+    if (u === "S") return soles(v);
+    if (u === "m") return fmt1(v) + " meses";
+    return Number(v).toFixed(2);
+  },
+  _fmtCorto: function (v, u) {
+    if (v === null || v === undefined || isNaN(v)) return "—";
+    if (u === "S") return solesM(v);
+    return this._fmt(v, u);
+  },
+  _hayValor: function (x) {
+    return !!x && x.valor !== null && x.valor !== undefined && !isNaN(x.valor);
+  },
+
+  _E: function () {
+    return ((this._D || {}).contasis_mensual || {}).empresas || {};
+  },
+
+  /* LOS MESES CON EXCEL: libro caja, cierres y registros de las cuatro. */
+  _meses: function () {
+    var E = this._E(), ks = {};
+    Object.keys(E).forEach(function (r) {
+      Object.keys(E[r].caja || {}).forEach(function (k) { ks[k] = 1; });
+      Object.keys(E[r].cierres || {}).forEach(function (k) { ks[k] = 1; });
+      var R = E[r].registros || {};
+      Object.keys(R).forEach(function (t) { if (R[t].periodo) ks[R[t].periodo] = 1; });
+    });
+    return Object.keys(ks).sort();
+  },
+  _mes: function () {
+    var ks = this._meses();
+    if (!ks.length) return null;
+    return ks.indexOf(this._mesSel) >= 0 ? this._mesSel : ks[ks.length - 1];
+  },
+
+  _tabsDe: function (e, mes) {
+    var c = (e.cierres || {})[mes], cj = (e.caja || {})[mes], R = e.registros || {};
+    var cp = (e.cierres || {})[this._mesAntes(mes)];
+    var t = [];
+    if (c && c.ratios) t.push(["ratios", "Ratios"]);
+    if (c && c.esf) t.push(["esf", "Situación financiera"]);
+    if (c && c.er) t.push(["er", "Resultados"]);
+    if (c && c.esf && c.er && cp && cp.esf && cp.er) t.push(["epn", "Cambios en el patrimonio"]);
+    if (cj) t.push(["efe", "Flujo de efectivo"]);
+    if (c && c.er) t.push(["ori", "Resultados integrales"]);
+    if (c && c.balance) t.push(["mayor", "Libro mayor"]);
+    if (cj) t.push(["caja", "Libro caja"]);
+    if (cj) t.push(["movs", "Movimientos de caja"]);
+    if (Object.keys(R).some(function (x) { return R[x].periodo === mes; }))
+      t.push(["regs", "Ventas y compras"]);
+    return t;
+  },
+
+  pintar: function (M, D) {
+    this._M = M; this._D = D;
+    var self = this;
+    if (!this._kpis) {
+      this._kpis = {};
+      this._RAT.forEach(function (r) { self._kpis[r[0]] = true; });
+    }
+    if (!this._kpisC) {
+      this._kpisC = {};
+      this._IND.forEach(function (r) { self._kpisC[r[0]] = true; });
+    }
+    return '<div id="cs-caja">' + this._cuerpo() + '</div>';
+  },
+
+  _cuerpo: function () {
+    var self = this, E = this._E(), mes = this._mes();
+    if (!mes) return '';
+    var emps = this._EMPS.filter(function (e) {
+      return E[e[0]] && self._tabsDe(E[e[0]], mes).length;
+    });
+    if (!emps.length) return '';
+    if (!emps.some(function (e) { return e[0] === self._emp; })) this._emp = emps[0][0];
+    var emp = E[this._emp];
+    var tabs = this._tabsDe(emp, mes);
+    if (!tabs.some(function (t) { return t[0] === self._tab; })) this._tab = tabs[0][0];
+
+    var mesesK = this._meses();
+    var queTiene = function (k) {
+      var n = 0, completo = 0;
+      self._EMPS.forEach(function (e) {
+        var E2 = E[e[0]]; if (!E2) return;
+        if (self._tabsDe(E2, k).length) n++;
+        if ((E2.cierres || {})[k]) completo++;
+      });
+      return completo ? '' : ' · solo libro caja';
+    };
+    var h = '<div class="d-lienzo"><div class="cs-barra">' +
+      '<label class="cs-f">Mes<select id="cs-mes">' +
+      mesesK.map(function (k) {
+        return '<option value="' + k + '"' + (k === mes ? ' selected' : '') + '>' +
+          esc(self._mesTxt(k)) + esc(queTiene(k)) + '</option>';
+      }).join('') + '</select></label>' +
+      '<label class="cs-f">Empresa<select id="cs-emp">' +
+      emps.map(function (e) {
+        return '<option value="' + e[0] + '"' + (self._emp === e[0] ? ' selected' : '') +
+          '>' + esc(e[1]) + '</option>';
+      }).join('') + '</select></label>' +
+      '<span class="cs-dato">' + ent(tabs.length) + ' reportes de ' +
+      esc(self._mesTxt(mes)) + '</span></div>' +
+      '<div class="pills-emp cs-tabs" role="tablist">' + tabs.map(function (t) {
+        return '<button type="button" class="pill-emp' + (self._tab === t[0] ? ' activa' : '') +
+          '" data-cs-tab="' + t[0] + '" role="tab" aria-selected="' +
+          (self._tab === t[0]) + '">' + esc(t[1]) + '</button>';
+      }).join('') + '</div>';
+
+    var c = (emp.cierres || {})[mes];
+    var cuerpo = '';
+    if (this._tab === "ratios") cuerpo = this._ratios(emp, c, mes, E);
+    else if (this._tab === "esf") cuerpo = this._esf(emp, c, mes);
+    else if (this._tab === "er") cuerpo = this._er(emp, c, mes);
+    else if (this._tab === "epn") cuerpo = this._epn(emp, c, mes);
+    else if (this._tab === "efe") cuerpo = this._efe(emp, mes);
+    else if (this._tab === "ori") cuerpo = this._ori(emp, c, mes);
+    else if (this._tab === "mayor") cuerpo = this._mayor(emp, c, mes);
+    else if (this._tab === "caja") cuerpo = this._caja(emp, mes, E);
+    else if (this._tab === "movs") cuerpo = this._movs(emp, mes);
+    else if (this._tab === "regs") cuerpo = this._registros(emp, mes);
+    return h + cuerpo + '</div>';
+  },
+
+  _tarjeta: function (id, chip, preg, cifra, exacta, pie, rojo, pieRojo) {
+    return '<div class="d-carta d-abrible abrible" data-abre="' + id +
+      '" aria-expanded="false" tabindex="0" role="button">' +
+      '<div class="d-cab"><span class="d-chip">' + chip + '</span><span class="d-preg">' +
+      esc(preg) + '</span></div>' +
+      '<div class="d-cifra"' + (rojo ? ' style="color:var(--rojo)"' : '') + '>' + cifra + '</div>' +
+      '<div class="d-exacta">' + exacta + '</div>' +
+      '<div class="d-pie"' + (pieRojo ? ' style="color:var(--rojo)"' : '') + '>' + pie + '</div></div>';
+  },
+
+  _ratios: function (emp, c, mes, E) {
+    var self = this, R = c.ratios || {};
+    var h = '';
+    var vis = this._RAT.slice();
+    var conValor = vis.filter(function (r) { return self._hayValor(R[r[0]]); });
+
+    if (conValor.length) {
+      h += '<div class="d-kpis">';
+      conValor.forEach(function (r) {
+        var x = R[r[0]];
+        var mal = r[2] === "%" && x.valor < 0;
+        h += self._tarjeta("cs-r-" + r[0], r[3], r[1], self._fmtCorto(x.valor, r[2]),
+          esc(emp.nombre) + ' · ' + esc(self._mesTxt(mes)),
+          x.aviso ? 'Costo de ventas vacío o casi cero · Contabilidad' : 'ContaSis', mal, !!x.aviso);
+      });
+      h += '</div>';
+      conValor.forEach(function (r) { h += '<div class="detalle" id="det-cs-r-' + r[0] + '"></div>'; });
+    }
+
+    /* las empresas con cierre ese mes */
+    var cols = this._EMPS.filter(function (e) {
+      var cc = ((E[e[0]] || {}).cierres || {})[mes];
+      return cc && cc.ratios;
+    });
+    h += '<div class="d-carta"><h3 class="d-tit">Ratios por empresa · ' +
+      esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Ratio</th>' + cols.map(function (e) {
+        return '<th class="num">' + esc(e[1]) + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    vis.forEach(function (r) {
+      h += '<tr><td class="obra">' + esc(r[1]) + '</td>' + cols.map(function (e) {
+        var x = E[e[0]].cierres[mes].ratios[r[0]];
+        return '<td class="num' + (e[0] === self._emp ? ' cs-sel' : '') + '">' +
+          self._fmt(x ? x.valor : null, r[2]) + '</td>';
+      }).join('') + '</tr>';
+    });
+    return h + '</tbody></table></div></div>';
+  },
+
+  _esTotal: function (s) {
+    var n = String(s || "").toUpperCase();
+    return n.indexOf("TOTAL") === 0 || n.indexOf("T O T A L") === 0;
+  },
+  _tablaLineas: function (titulo, lineas, bold) {
+    var filas = (lineas || []).filter(function (l) {
+      return l[1] !== null && l[1] !== undefined; });
+    if (!filas.length) return '';
+    var h = '<div class="d-carta"><h3 class="d-tit">' + titulo + '</h3>' +
+      '<div class="envoltura-tabla"><table class="datos sin-orden"><thead><tr><th>Cuenta</th>' +
+      '<th class="num">Monto</th></tr></thead><tbody>';
+    filas.forEach(function (l) {
+      h += '<tr' + (bold(l[0]) ? ' class="total"' : '') + '><td class="obra">' + esc(l[0]) +
+        '</td><td class="num"' + (l[1] < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        soles(l[1]) + '</td></tr>';
+    });
+    return h + '</tbody></table></div></div>';
+  },
+
+  _ESF_A: [
+    ["a", "h", "Activos"],
+    ["ac", "h2", "Activos Corrientes"],
+    ["a_efe", "l", "Efectivo y Equivalentes al Efectivo", "ac:efectivo y equivalentes de efectivo"],
+    ["a_oaf", "l", "Otros Activos Financieros", "ac:otros activos financieros"],
+    ["a_cxc", "s", "Cuentas por Cobrar Comerciales y Otras Cuentas por Cobrar", "", ["a_cxcc", "a_cxcr", "a_ocxc", "a_ant"]],
+    ["a_cxcc", "i", "Cuentas por Cobrar Comerciales", "ac:cuentas por cobrar comerciales (neto)"],
+    ["a_cxcr", "i", "Cuentas por Cobrar a Entidades Relacionadas", "ac:cuentas por cobrar a entidades relaciona"],
+    ["a_ocxc", "i", "Otras Cuentas por Cobrar", "ac:otras cuentas por cobrar (neto)"],
+    ["a_ant", "i", "Anticipos", "ac:anticipos"],
+    ["a_inv", "l", "Inventarios", "ac:inventarios"],
+    ["a_bio", "l", "Activos Biológicos", "ac:activos biologicos"],
+    ["a_imp", "l", "Activos por Impuestos a las Ganancias", "ac:activos por impuestos a las ganancias"],
+    ["a_onf", "l", "Otros Activos no Financieros", "ac:otros activos no financieros"],
+    ["a_pig", "l", "Activos Corrientes Distintos al Efectivo Pignorados como Garantía Colateral", ""],
+    ["a_tdist", "t", "Total Activos Corrientes Distintos de los Activos no Corrientes o Grupos de Activos para su Disposición Clasificados como Mantenidos para la Venta o para Distribuir a los Propietarios",
+      "ac:total activos ctes distin manten venta o", ["a_efe", "a_oaf", "a_cxc", "a_inv", "a_bio", "a_imp", "a_onf", "a_pig"]],
+    ["a_mant", "l", "Activos no Corrientes o Grupos de Activos para su Disposición Clasificados como Mantenidos para la Venta o como Mantenidos para Distribuir a los Propietarios",
+      "ac:act no cte mantenidos para la venta o di"],
+    ["a_x1", "x", "", "ac:activos no ctes mantenidos para venta"],
+    ["a_x2", "x", "", "ac:activos no ctes para distribuir a propie"],
+    ["a_tac", "t", "Total Activos Corrientes", "ac:total activo corriente", ["a_tdist", "a_mant"]],
+    ["anc", "h2", "Activos No Corrientes"],
+    ["n_oaf", "l", "Otros Activos Financieros", "anc:otros activos financieros"],
+    ["n_inv", "l", "Inversiones en Subsidiarias, Negocios Conjuntos y Asociadas", "anc:inversiones en subsidiarias, negocios co"],
+    ["n_cxc", "s", "Cuentas por Cobrar Comerciales y Otras Cuentas por Cobrar", "", ["n_cxcc", "n_cxcr", "n_ocxc", "n_ant"]],
+    ["n_cxcc", "i", "Cuentas por Cobrar Comerciales", "anc:ctas por cobrar comerciales"],
+    ["n_cxcr", "i", "Cuentas por Cobrar a Entidades Relacionadas", "anc:cuentas por cobrar a entidades relaciona"],
+    ["n_ocxc", "i", "Otras Cuentas por Cobrar", "anc:otras cuentas por cobrar"],
+    ["n_ant", "i", "Anticipos", "anc:anticipos"],
+    ["n_invt", "l", "Inventarios", ""],
+    ["n_bio", "l", "Activos Biológicos", "anc:activos biologicos"],
+    ["n_pinv", "l", "Propiedades de Inversión", "anc:propiedades de inversion"],
+    ["n_ppe", "l", "Propiedades, Planta y Equipo", "anc:propiedades plantas y equipos (neto)"],
+    ["n_int", "l", "Activos Intangibles Distintos de la Plusvalía", "anc:activos intangibles distintos de la pl"],
+    ["n_aid", "l", "Activos por Impuestos Diferidos", "anc:activos por impuestos diferidos"],
+    ["n_aic", "l", "Activos por Impuestos Corrientes, no Corrientes", ""],
+    ["n_plus", "l", "Plusvalía", "anc:plusvalia"],
+    ["n_onf", "l", "Otros Activos no Financieros", "anc:otros activos no financieros"],
+    ["n_pig", "l", "Activos no Corrientes Distintos al Efectivo Pignorados como Garantía Colateral", ""],
+    ["n_tanc", "t", "Total Activos No Corrientes", "anc:total activo no corriente",
+      ["n_oaf", "n_inv", "n_cxc", "n_invt", "n_bio", "n_pinv", "n_ppe", "n_int", "n_aid", "n_aic", "n_plus", "n_onf", "n_pig"]],
+    ["a_tot", "T", "TOTAL DE ACTIVOS", "anc:t o t a l a c t i v o", ["a_tac", "n_tanc"]]
+  ],
+  _ESF_P: [
+    ["p", "h", "Pasivos y Patrimonio"],
+    ["pc", "h2", "Pasivos Corrientes"],
+    ["p_opf", "l", "Otros Pasivos Financieros", "pc:otros pasivos financieros"],
+    ["p_cxp", "s", "Cuentas por Pagar Comerciales y Otras Cuentas por Pagar", "", ["p_cxpc", "p_cxpr", "p_ocxp"]],
+    ["p_cxpc", "i", "Cuentas por Pagar Comerciales", "pc:cuentas por pagar comerciales"],
+    ["p_cxpr", "i", "Cuentas por Pagar a Entidades Relacionadas", "pc:cuentas por pagar a entidades relacionad"],
+    ["p_ocxp", "i", "Otras Cuentas por Pagar", "pc:otras cuentas por pagar"],
+    ["p_idif", "l", "Ingresos Diferidos", "pc:ingresos diferidos"],
+    ["p_pben", "l", "Provisión por Beneficios a los Empleados", "pc:provision por beneficios a los empleados"],
+    ["p_oprov", "l", "Otras Provisiones", "pc:otras provisiones"],
+    ["p_pimp", "l", "Pasivos por Impuestos a las Ganancias", "pc:pasivos por impuestos a las ganancias"],
+    ["p_onf", "l", "Otros Pasivos no Financieros", "pc:otros pasivos no financieros"],
+    ["p_tdist", "t", "Total de Pasivos Corrientes Distintos de Pasivos Incluidos en Grupos de Activos para su Disposición Clasificados como Mantenidos para la Venta",
+      "pc:total pasivo cte distin mant venta", ["p_opf", "p_cxp", "p_idif", "p_pben", "p_oprov", "p_pimp", "p_onf"]],
+    ["p_mant", "l", "Pasivos incluidos en Grupos de Activos para su Disposición Clasificados como Mantenidos para la Venta", "pc:pasivo incluido en activo mantenido para"],
+    ["p_tpc", "t", "Total Pasivos Corrientes", "pc:total pasivos corrientes", ["p_tdist", "p_mant"]],
+    ["pnc", "h2", "Pasivos No Corrientes"],
+    ["q_opf", "l", "Otros Pasivos Financieros", "pnc:otros pasivos financieros"],
+    ["q_cxp", "s", "Cuentas por Pagar Comerciales y Otras Cuentas por Pagar", "", ["q_cxpc", "q_cxpr", "q_ocxp"]],
+    ["q_cxpc", "i", "Cuentas por Pagar Comerciales", "pnc:cuentas por pagar comerciales"],
+    ["q_cxpr", "i", "Cuentas por Pagar a Entidades Relacionadas", "pnc:cuentas por pagar a entidades relacionad"],
+    ["q_ocxp", "i", "Otras Cuentas por Pagar", "pnc:otras cuentas por pagar"],
+    ["q_idif", "l", "Ingresos Diferidos", "pnc:ingresos diferidos"],
+    ["q_pben", "l", "Provisión por Beneficios a los Empleados", "pnc:provision por beneficios a los empleados"],
+    ["q_oprov", "l", "Otras Provisiones", "pnc:otras provisiones"],
+    ["q_pid", "l", "Pasivos por Impuestos Diferidos", "pnc:pasivos por impuestos diferidos"],
+    ["q_pic", "l", "Pasivos por Impuestos Corrientes, no Corriente", ""],
+    ["q_onf", "l", "Otros Pasivos no Financieros", "pnc:otros pasivos no financieros"],
+    ["q_tpnc", "t", "Total Pasivos No Corrientes", "pnc:total pasivos no corrientes",
+      ["q_opf", "q_cxp", "q_idif", "q_pben", "q_oprov", "q_pid", "q_pic", "q_onf"]],
+    ["p_tot", "T", "Total Pasivos", "pnc:total pasivo", ["p_tpc", "q_tpnc"]],
+    ["k", "h", "Patrimonio"],
+    ["k_cap", "l", "Capital Emitido", "pat:capital emitido"],
+    ["k_prim", "l", "Primas de Emisión", "pat:primas de emision"],
+    ["k_accinv", "l", "Acciones de Inversión", "pat:acciones de inversion"],
+    ["k_accprop", "l", "Acciones Propias en Cartera", "pat:acciones propias en cartera"],
+    ["k_orc", "l", "Otras Reservas de Capital", "pat:otras reservas de capital"],
+    ["k_ra", "l", "Resultados Acumulados", "pat:resultados acumulados"],
+    ["k_orp", "l", "Otras Reservas de Patrimonio", "pat:otras reservas de patrimonio"],
+    ["k_tpat", "t", "Total Patrimonio", "pat:total patrimonio",
+      ["k_cap", "k_prim", "k_accinv", "k_accprop", "k_orc", "k_ra", "k_orp"]],
+    ["pp_tot", "T", "TOTAL PASIVO Y PATRIMONIO", "pat:total pasivo y patrimonio neto", ["p_tot", "k_tpat"]]
+  ],
+  _ER_F: [
+    ["r_ing", "l", "Ingresos de Actividades Ordinarias", "f:ingresos de actividades ordinarias"],
+    ["r_cv", "l", "Costo de Ventas", "f:costo de ventas"],
+    ["r_bruta", "t", "Ganancia (Pérdida) Bruta", "f:ganancia (perdida) bruta", ["r_ing", "r_cv"]],
+    ["r_gv", "l", "Gastos de Ventas y Distribución", "f:gastos de ventas y distribucion"],
+    ["r_ga", "l", "Gastos de Administración", "f:gastos de administracion"],
+    ["r_oio", "l", "Otros Ingresos Operativos", "f:otros ingresos operativos"],
+    ["r_ogo", "l", "Otros Gastos Operativos", "f:otros gastos operativos"],
+    ["r_ogp", "l", "Otras Ganancias (Pérdidas)", "f:otras ganancias (perdidas)"],
+    ["r_oper", "t", "Ganancia (Pérdida) Operativa", "f:ganancia (perdida) por actividades de op",
+      ["r_bruta", "r_gv", "r_ga", "r_oio", "r_ogo", "r_ogp", "r_baja"]],
+    ["r_baja", "l", "Ganancia (Pérdida) de la Baja en Activos Financieros medidos al Costo Amortizado", "f:ganancia(perdida) baja activos financier"],
+    ["r_ifin", "l", "Ingresos Financieros", "f:ingresos financieros"],
+    ["r_iint", "l", "Ingresos por Intereses calculados usando el Método de Interés Efectivo", ""],
+    ["r_gfin", "l", "Gastos Financieros", "f:gastos financieros"],
+    ["r_det", "l", "Ganancia (Pérdida) por Deterioro de Valor (Pérdidas Crediticias Esperadas o Reversiones)", ""],
+    ["r_sub", "l", "Otros Ingresos (Gastos) de las Subsidiarias, Asociadas y Negocios Conjuntos", "f:otros ingresos (gastos) de las subsidiar"],
+    ["r_dc", "l", "Diferencias de Cambio Neto", "f:diferencias de cambio neto"],
+    ["r_recl", "l", "Ganancias (Pérdidas) por Reclasificación de Activos Financieros a Valor Razonable con cambios en Resultados antes medidos al Costo Amortizado", "f:ganancias (perdidas) que surgen de la di"],
+    ["r_orir", "l", "Ganancia (Pérdida) Acumulada en Otro Resultado Integral por Activos Financieros medidos a Valor Razonable reclasificados como cambios en Resultados", ""],
+    ["r_cob", "l", "Ganancias (Pérdidas) por Cobertura de un Grupo de Partidas con posiciones de Riesgo Compensadoras", ""],
+    ["r_dist", "l", "Diferencia entre el Importe en Libros de los Activos Distribuidos y el Importe en Libros del Dividendo a pagar", "f:diferencia entre el importe en libros de"],
+    ["r_antes", "t", "Ganancia (Pérdida) antes de Impuestos", "f:resultado antes de impuesto a las gananc",
+      ["r_oper", "r_ifin", "r_iint", "r_gfin", "r_det", "r_sub", "r_dc", "r_recl", "r_orir", "r_cob", "r_dist"]],
+    ["r_imp", "l", "Ingreso (Gasto) por Impuesto", "f:gasto por impuesto a las ganancias"],
+    ["r_cont", "t", "Ganancia (Pérdida) Neta de Operaciones Continuadas", "f:ganancia(perdida) neta operaciones conti", ["r_antes", "r_imp"]],
+    ["r_disc", "l", "Ganancia (Pérdida) procedente de Operaciones Discontinuadas, neta de Impuesto", "f:ganancia(perdida) impto gananc de op. di"],
+    ["r_neta", "T", "Ganancia (Pérdida) Neta del Ejercicio", "f:ganancia (perdida) neta del ejercicio", ["r_cont", "r_disc"]]
+  ],
+  _EFE: [
+    ["op", "h", "Flujo de Efectivo de Actividades de Operación"],
+    ["op_h1", "h2", "Clases de Cobros en Efectivo por Actividades de Operación"],
+    ["op_c_ventas", "l", "Venta de Bienes y Prestación de Servicios"],
+    ["op_c_regal", "l", "Regalías, Cuotas, Comisiones, Otros Ingresos de Actividades Ordinarias"],
+    ["op_c_contr", "l", "Contratos Mantenidos con Propósito de Intermediación o para Negociar"],
+    ["op_c_arr", "l", "Arrendamiento y Posterior Venta de Activos Mantenidos para Arrendar a Terceros"],
+    ["op_c_otros", "l", "Otros Cobros de Efectivo Relativos a las Actividades de Operación"],
+    ["op_h2", "h2", "Clases de Pagos en Efectivo por Actividades de Operación"],
+    ["op_p_prov", "l", "Proveedores de Bienes y Servicios"],
+    ["op_p_contr", "l", "Contratos Mantenidos con Propósito de Intermediación o para Negociar"],
+    ["op_p_emp", "l", "Pagos a y por Cuenta de los Empleados"],
+    ["op_p_arr", "l", "Elaboración o Adquisición de Activos para Arrendar y Otros Mantenidos para la Venta"],
+    ["op_p_otros", "l", "Otros Pagos de Efectivo Relativos a las Actividades de Operación"],
+    ["op_sub", "s", "Flujos de Efectivo y Equivalente al Efectivo procedente de (utilizados en) Operaciones", "",
+      ["op_c_ventas", "op_c_regal", "op_c_contr", "op_c_arr", "op_c_otros", "op_p_prov", "op_p_contr", "op_p_emp", "op_p_arr", "op_p_otros"]],
+    ["op_int_rec", "l", "Intereses Recibidos (no incluidos en la Actividad de Inversión)"],
+    ["op_int_pag", "l", "Intereses Pagados (no incluidos en la Actividad de Financiación)"],
+    ["op_div_rec", "l", "Dividendos Recibidos (no incluidos en la Actividad de Inversión)"],
+    ["op_div_pag", "l", "Dividendos Pagados (no incluidos en la Actividad de Financiación)"],
+    ["op_imp", "l", "Impuestos a las Ganancias (Pagados) Reembolsados"],
+    ["op_otros", "l", "Otros Cobros (Pagos) de Efectivo"],
+    ["op_tot", "t", "Flujos de Efectivo y Equivalente al Efectivo procedente de (utilizados en) Actividades de Operación", "",
+      ["op_sub", "op_int_rec", "op_int_pag", "op_div_rec", "op_div_pag", "op_imp", "op_otros"]],
+    ["in", "h", "Flujo de Efectivo de Actividades de Inversión"],
+    ["in_h1", "h2", "Clases de Cobros en Efectivo por Actividades de Inversión"],
+    ["in_c_terc", "l", "Reembolso de Adelantos de Préstamos y Préstamos Concedidos a Terceros"],
+    ["in_c_ctrl", "l", "Pérdida de Control de Subsidiarias u Otros Negocios"],
+    ["in_c_rel", "l", "Reembolsos Recibidos de Préstamos a Entidades Relacionadas"],
+    ["in_c_instr", "l", "Venta de Instrumentos Financieros de Patrimonio o Deuda de Otras Entidades"],
+    ["in_c_deriv", "l", "Contratos Derivados (Futuro, a Término, Opciones)"],
+    ["in_c_part", "l", "Venta de Participaciones en Negocios Conjuntos, Neto Del Efectivo Desapropiado"],
+    ["in_c_ppe", "l", "Venta de Propiedades, Planta y Equipo"],
+    ["in_c_intang", "l", "Venta de Activos Intangibles"],
+    ["in_c_olp", "l", "Venta de Otros Activos de Largo Plazo"],
+    ["in_c_subv", "l", "Subvenciones del Gobierno"],
+    ["in_c_int", "l", "Intereses Recibidos"],
+    ["in_c_div", "l", "Dividendos Recibidos"],
+    ["in_h2", "h2", "Clases de Pagos en Efectivo por Actividades de Inversión"],
+    ["in_p_terc", "l", "Préstamos Concedidos a Terceros"],
+    ["in_p_ctrl", "l", "Obtener el Control de Subsidiarias u Otros Negocios"],
+    ["in_p_rel", "l", "Prestamos Concedidos a Entidades Relacionadas"],
+    ["in_p_instr", "l", "Compra de Instrumentos Financieros de Patrimonio o Deuda de Otras Entidades"],
+    ["in_p_deriv", "l", "Contratos Derivados (Futuro, a Término, Opciones)"],
+    ["in_p_subs", "l", "Compra de Subsidiarias, Neto del Efectivo Adquirido"],
+    ["in_p_part", "l", "Compra de Participaciones en Negocios Conjuntos, Neto del Efectivo Adquirido"],
+    ["in_p_ppe", "l", "Compra de Propiedades, Planta y Equipo"],
+    ["in_p_intang", "l", "Compra de Activos Intangibles"],
+    ["in_p_olp", "l", "Compra de Otros Activos de Largo Plazo"],
+    ["in_imp", "l", "Impuestos a las Ganancias (Pagados) Reembolsados"],
+    ["in_otros", "l", "Otros Cobros (Pagos) de Efectivo Relativos a las Actividades de Inversión"],
+    ["in_tot", "t", "Flujos de Efectivo y Equivalente al Efectivo procedente de (utilizados en) Actividades de Inversión", "",
+      ["in_c_terc", "in_c_ctrl", "in_c_rel", "in_c_instr", "in_c_deriv", "in_c_part", "in_c_ppe", "in_c_intang", "in_c_olp", "in_c_subv", "in_c_int", "in_c_div",
+       "in_p_terc", "in_p_ctrl", "in_p_rel", "in_p_instr", "in_p_deriv", "in_p_subs", "in_p_part", "in_p_ppe", "in_p_intang", "in_p_olp", "in_imp", "in_otros"]],
+    ["fi", "h", "Flujo de Efectivo de Actividades de Financiación"],
+    ["fi_h1", "h2", "Clases de Cobros en Efectivo por Actividades de Financiación:"],
+    ["fi_c_prest", "l", "Obtención de Préstamos"],
+    ["fi_c_rel", "l", "Préstamos de Entidades Relacionadas"],
+    ["fi_c_part", "l", "Cambios en las Participaciones en la Propiedad de Subsidiarias que no Resultan en Pérdida de Control"],
+    ["fi_c_acc", "l", "Emisión de Acciones"],
+    ["fi_c_oinst", "l", "Emisión de Otros Instrumentos de Patrimonio"],
+    ["fi_c_subv", "l", "Subvenciones del Gobierno"],
+    ["fi_h2", "h2", "Clases de Pagos en Efectivo por Actividades de Financiación:"],
+    ["fi_p_amort", "l", "Amortización o Pago de Préstamos"],
+    ["fi_p_arr", "l", "Pasivos por Arrendamiento Financiero"],
+    ["fi_p_rel", "l", "Préstamos de Entidades Relacionadas"],
+    ["fi_p_part", "l", "Cambios en las Participaciones en la Propiedad de Subsidiarias que no Resultan en Pérdida de Control"],
+    ["fi_p_recompra", "l", "Recompra o Rescate de Acciones de la Entidad (Acciones en Cartera)"],
+    ["fi_p_adq", "l", "Adquisición de Otras Participaciones en el Patrimonio"],
+    ["fi_p_int", "l", "Intereses Pagados"],
+    ["fi_p_div", "l", "Dividendos Pagados"],
+    ["fi_imp", "l", "Impuestos a las Ganancias (Pagados) Reembolsados"],
+    ["fi_otros", "l", "Otros Cobros (Pagos) de Efectivo Relativos a las Actividades de Financiación"],
+    ["fi_tot", "t", "Flujos de Efectivo y Equivalente al Efectivo procedente de (utilizados en) Actividades de Financiación", "",
+      ["fi_c_prest", "fi_c_rel", "fi_c_part", "fi_c_acc", "fi_c_oinst", "fi_c_subv", "fi_p_amort", "fi_p_arr", "fi_p_rel", "fi_p_part",
+       "fi_p_recompra", "fi_p_adq", "fi_p_int", "fi_p_div", "fi_imp", "fi_otros"]],
+    ["mov10", "l", "Movimientos contra otras cuentas de efectivo (cuenta 10)", "", null, {siHay: true}],
+    ["neto_antes", "t", "Aumento (Disminución) Neto de Efectivo y Equivalente al Efectivo, antes de las Variaciones en las Tasas de Cambio", "",
+      ["op_tot", "in_tot", "fi_tot", "mov10"]],
+    ["tc", "l", "Efectos de las Variaciones en las Tasas de Cambio sobre el Efectivo y Equivalentes al Efectivo"],
+    ["neto", "t", "Aumento (Disminución) Neto de Efectivo y Equivalente al Efectivo", "", ["neto_antes", "tc"]],
+    ["ini", "l", "Efectivo y Equivalente al Efectivo al Inicio del Período"],
+    ["fin", "T", "Efectivo y Equivalente al Efectivo al Finalizar el Período", "", ["ini", "neto"]]
+  ],
+  _ORI: [
+    ["o_neta", "l", "Ganancia (Pérdida) Neta del Ejercicio"],
+    ["o_hn", "h2", "Componente de Otro Resultado Integral que no se Reclasificaran al Resultado del Período, neto de Impuestos:"],
+    ["o_n1", "i", "Ganancias (Pérdidas) de Inversiones en Instrumentos de Patrimonio al Valor Razonable, neto de Impuestos"],
+    ["o_n2", "i", "Superávit de Revaluación, neto de Impuestos"],
+    ["o_n3", "i", "Ganancia (Pérdida) de Nuevas Mediciones de Planes de Beneficios Definidos, neto de Impuestos"],
+    ["o_n4", "i", "Cambios en el Valor Razonable de Pasivos Financieros Atribuibles a Cambios en el Riesgo de Crédito del Pasivo, neto de Impuestos"],
+    ["o_n5", "i", "Instrumentos de Cobertura que Cubren Inversiones en Instrumentos de Patrimonio, neto de Impuestos"],
+    ["o_n6", "i", "Participación en Otro Resultado Integral de Subsidiarias, Asociadas y Negocios Conjuntos Contabilizados por el Método de Participación, neto de Impuestos"],
+    ["o_tn", "s", "Total Otro Resultado Integral que no se Reclasificará al Resultado del Periodo, neto de Impuestos", "", ["o_n1", "o_n2", "o_n3", "o_n4", "o_n5", "o_n6"]],
+    ["o_hr", "h2", "Componentes de Otro Resultado Integral que se Reclasificaran al Resultado del Periodo neto de Impuestos"],
+    ["o_hr1", "h2", "Coberturas del Flujo de Efectivo"],
+    ["o_r1", "i", "Ganancias (Pérdidas) por Cobertura de Flujos de Efectivo, neto de Impuestos"],
+    ["o_r2", "i", "Ajustes de Reclasificación en Coberturas de Flujos de Efectivo, neto de Impuestos"],
+    ["o_r3", "i", "Importes Eliminados del Patrimonio E Incluidos en el Importe en Libros de Activos (Pasivos) no Financieros que se Hayan Adquirido o Incurrido Mediante Una Transacción Prevista Altamente Probable Cubierta, neto de Impuestos"],
+    ["o_hr2", "h2", "Coberturas de Inversiones netas en Negocios en el Extranjero"],
+    ["o_r4", "i", "Ganancias (Pérdidas) por Cobertura de Inversiones netas en Negocios en el Extranjero, neto de Impuesto"],
+    ["o_r5", "i", "Ajustes de Reclasificación por Coberturas de Inversiones netas en Negocios en el Extranjero, neto de Impuestos"],
+    ["o_hr3", "h2", "Diferencia de Cambio por Conversión de Operaciones en el Extranjero"],
+    ["o_r6", "i", "Ganancias (Pérdidas) por Diferencias de Cambio de Conversión de Operaciones en el Extranjero, netas de Impuesto"],
+    ["o_r7", "i", "Ajustes de Reclasificación en Diferencia de Cambio de Conversión de Operaciones en el Extranjero, netos de Impuestos"],
+    ["o_r8", "l", "Variación neta de Activos no Corrientes o Grupos de Activos Mantenidos para la Venta"],
+    ["o_hr4", "h2", "Activos Financieros Disponibles para la Venta"],
+    ["o_r9", "i", "Ganancias (Pérdidas) por Nuevas Mediciones de Activos Financieros Disponibles para la Venta, neto de Impuestos"],
+    ["o_r10", "i", "Ajustes de Reclasificación, Activos Financieros Disponibles para la Venta, neto de Impuestos"],
+    ["o_hr5", "h2", "Cambios en el Valor Temporal del Dinero de Opciones"],
+    ["o_r11", "i", "Ganancia (Pérdida) por Cambios en el Valor Temporal del Dinero de Opciones, neto de Impuestos"],
+    ["o_r12", "i", "Ajustes de Reclasificación por Cambios en el Valor Temporal del Dinero de Opciones, neto de Impuestos"],
+    ["o_hr6", "h2", "Cambios en el Valor de los Elementos del Contrato a Término"],
+    ["o_r13", "i", "Ganancia (Pérdida) por Cambios en el Valor de los Elementos de Contratos a Término, neta de Impuestos"],
+    ["o_r14", "i", "Ajustes de Reclasificación por Cambios en el Valor de los Elementos de Contratos a Término, neto de Impuestos"],
+    ["o_hr7", "h2", "Cambio en el Valor de los Diferenciales de Tasa de Cambio de Moneda Extranjera"],
+    ["o_r15", "i", "Ganancia (Pérdida) por Cambios en el Valor de los Diferenciales de la Tasa de Cambio de la Moneda Extranjera, neto de Impuestos"],
+    ["o_r16", "i", "Ajustes de Reclasificación por Cambios en el Valor de los Diferenciales de la Tasa de Cambio de la Moneda Extranjera, netos de Impuestos"],
+    ["o_hr8", "h2", "Activos Financieros Medidos al Valor Razonable con Cambios en Otro Resultado Integral"],
+    ["o_r17", "i", "Ganancias (Pérdidas) por Activos Financieros Medidos al Valor Razonable con Cambios en Otro Resultado Integral, neta de Impuestos"],
+    ["o_r18", "i", "Ajustes de Reclasificación sobre Activos Financieros Medidos al Valor Razonable con Cambios en Otro Resultado Integral, netos de Impuestos"],
+    ["o_r19", "l", "Importes Eliminados del Patrimonio Contra el Valor Razonable de Activos Financieros, por Su Reclasificación a Activos Financieros al Costo Amortizado, neto de Impuestos"],
+    ["o_r20", "l", "Participacion de Otro Resultado Integral de Subsidiarias, Asociadas y Negocios Conjuntos Contabilizados Utilizando el Método de la Participación, neto de Impuestos"],
+    ["o_tr", "s", "Total Otro Resultado Integral que se Reclasificará al Resultado del Periodo, neto de Impuestos", "",
+      ["o_r1", "o_r2", "o_r3", "o_r4", "o_r5", "o_r6", "o_r7", "o_r8", "o_r9", "o_r10", "o_r11", "o_r12", "o_r13", "o_r14", "o_r15", "o_r16", "o_r17", "o_r18", "o_r19", "o_r20"]],
+    ["o_tot", "t", "Total Otro Resultado Integral", "", ["o_tn", "o_tr"]],
+    ["o_ri", "T", "Total Resultado Integral del Ejercicio, neto de Impuesto", "", ["o_neta", "o_tot"]]
+  ],
+
+  _CTA_ESF: {
+    a_efe: [["10", "D"]],
+    a_oaf: [["11", "D"]],
+    a_cxcc: [["12", "D"], ["19", "A", -1]],
+    a_cxcr: [["13", "D"], ["17", "D"], ["43", "D"], ["47", "D"]],
+    a_ocxc: [["14", "D"], ["16", "D"], ["40", "D"], ["41", "D"], ["42", "D"], ["44", "D"], ["45", "D"], ["46", "D"]],
+    a_ant: [["18", "D"]],
+    a_inv: [["20", "D"], ["21", "D"], ["22", "D"], ["23", "D"], ["24", "D"], ["25", "D"], ["26", "D"], ["27", "D"], ["28", "D"], ["29", "A", -1]],
+    a_bio: [["35", "D"]],
+    a_onf: [["38", "D"]],
+    n_oaf: [["30", "D"]],
+    n_pinv: [["31", "D"]],
+    n_ppe: [["32", "D"], ["33", "D"], ["39", "A", -1]],
+    n_int: [["34", "D"]],
+    n_aid: [["37", "D"]],
+    p_opf: [["10", "A"], ["45", "A"]],
+    p_cxpc: [["42", "A"]],
+    p_cxpr: [["43", "A"], ["47", "A"]],
+    p_ocxp: [["12", "A"], ["13", "A"], ["14", "A"], ["16", "A"], ["17", "A"], ["40", "A"], ["41", "A"], ["44", "A"]],
+    p_idif: [["49", "A"]],
+    p_oprov: [["48", "A"]],
+    p_onf: [["46", "A"]],
+    k_cap: [["50", "A"]],
+    k_accinv: [["51", "A"]],
+    k_prim: [["52", "A"]],
+    k_orp: [["56", "A"], ["57", "A"]],
+    k_orc: [["58", "A"]],
+    k_ra: [["59", "A"], ["59", "D", -1], ["R"]]
+  },
+  _CTA_ER: {
+    r_ing: ["70", "74"],
+    r_cv: ["69", "90", "91", "92", "93"],
+    r_gv: ["95"],
+    r_ga: ["94"],
+    r_oio: ["73", "75"],
+    r_ogo: ["96"],
+    r_ifin: ["77"],
+    r_dc: ["77"],
+    r_gfin: ["97"],
+    r_imp: ["88"]
+  },
+  _ER_JUNTAS: {r_ifin: ["r_ifin", "r_dc"], r_dc: ["r_ifin", "r_dc"]},
+
+  _MESC: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "set", "oct", "nov", "dic"],
+  _mesAntes: function (mes) {
+    var m = /^(\d{4})-(\d{2})$/.exec(String(mes || ""));
+    if (!m) return "";
+    var a = Number(m[1]), n = Number(m[2]) - 1;
+    if (n < 1) { a--; n = 12; }
+    return a + "-" + this._pad(n);
+  },
+  _alCierre: function (mes) {
+    var m = /^(\d{4})-(\d{2})$/.exec(String(mes || ""));
+    if (!m) return String(mes || "");
+    return new Date(Number(m[1]), Number(m[2]), 0).getDate() + "-" +
+      this._MESC[Number(m[2]) - 1] + "-" + m[1];
+  },
+  _norm: function (s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .toLowerCase().replace(/\s+/g, " ").trim();
+  },
+  _cero: function (v) {
+    return v === null || v === undefined || isNaN(v) || Math.abs(v) < 0.005;
+  },
+  _nf: function (v) {
+    if (v === null || v === undefined || isNaN(v)) return "—";
+    var a = Math.abs(v) < 0.005 ? 0 : v;
+    var t = Math.abs(a).toLocaleString("es-PE", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    return a < 0 ? "(" + t + ")" : t;
+  },
+  _fila: function (plantilla, id) {
+    for (var i = 0; i < plantilla.length; i++) if (plantilla[i][0] === id) return plantilla[i];
+    return null;
+  },
+
+  _porRotulo: function (lineas, inicio) {
+    var self = this, sec = inicio, out = {};
+    (lineas || []).forEach(function (l) {
+      var n = self._norm(l[0]);
+      if (!n) return;
+      if (n === "activos no corrientes") sec = "anc";
+      else if (n === "pasivos no corrientes") sec = "pnc";
+      else if (n === "patrimonio") sec = "pat";
+      var k = sec + ":" + n;
+      if (!(k in out)) out[k] = {v: l[1], rot: l[0], usado: false};
+    });
+    return out;
+  },
+  _evaluar: function (plantilla, dato) {
+    var self = this, v = {}, calc = {}, desc = [];
+    plantilla.forEach(function (f) {
+      if (f[1] === "l" || f[1] === "i" || f[1] === "x") {
+        var x = dato(f);
+        v[f[0]] = self._cero(x) ? 0 : x;
+      }
+    });
+    plantilla.forEach(function (f) {
+      var t = f[1];
+      if (t !== "s" && t !== "t" && t !== "T") return;
+      var suma = (f[4] || []).reduce(function (a, k) { return a + (v[k] || 0); }, 0);
+      var x = t === "s" ? null : dato(f);
+      if (x === null || x === undefined) {
+        v[f[0]] = suma;
+        if (t !== "s") calc[f[0]] = true;
+      } else {
+        v[f[0]] = x;
+        if (Math.abs(suma - x) >= 0.005)
+          desc.push({id: f[0], rot: f[2], suma: suma, fuente: x});
+      }
+    });
+    return {v: v, calc: calc, desc: desc};
+  },
+  _valContaSis: function (plantilla, R) {
+    var self = this;
+    var r = this._evaluar(plantilla, function (f) {
+      var x = f[3] ? R[f[3]] : null;
+      if (!x) return null;
+      x.usado = true;
+      return x.v;
+    });
+    r.sueltas = Object.keys(R).map(function (k) { return R[k]; })
+      .filter(function (x) { return !x.usado && !self._cero(x.v); });
+    return r;
+  },
+  _valESF: function (c) {
+    if (!c || !c.esf) return null;
+    var RA = this._porRotulo(c.esf.activo, "ac"), RP = this._porRotulo(c.esf.pasivo, "pc");
+    var a = this._valContaSis(this._ESF_A, RA), p = this._valContaSis(this._ESF_P, RP);
+    var v = {};
+    Object.keys(a.v).forEach(function (k) { v[k] = a.v[k]; });
+    Object.keys(p.v).forEach(function (k) { v[k] = p.v[k]; });
+    return {v: v, calc: Object.assign({}, a.calc, p.calc), desc: a.desc.concat(p.desc),
+            sueltas: a.sueltas.concat(p.sueltas)};
+  },
+  _valER: function (c) {
+    if (!c || !c.er) return null;
+    return this._valContaSis(this._ER_F, this._porRotulo(c.er.funcion, "f"));
+  },
+
+  /* El balance de un cierre, por cuenta de dos dígitos. */
+  _bal: function (c) {
+    var B = {};
+    ((c && c.balance && c.balance.cuentas) || []).forEach(function (x) { B[x.cuenta] = x; });
+    return B;
+  },
+  _resBal: function (c) {
+    var r = c && c.balance ? c.balance.resultado : null;
+    if (!r) return null;
+    if (!this._cero(r.PASIVO)) return r.PASIVO;
+    if (!this._cero(r.ACTIVO)) return -r.ACTIVO;
+    return 0;
+  },
+  _funcion: function (b) { return b ? (b["GAN. FUN."] || 0) - (b["PER. FUN."] || 0) : 0; },
+  _naturaleza: function (b) { return b ? (b["GAN. NAT."] || 0) - (b["PER. NAT."] || 0) : 0; },
+
+  _ctasEsf: function (c, id) {
+    var self = this, B = this._bal(c), out = [];
+    (this._CTA_ESF[id] || []).forEach(function (r) {
+      if (r[0] === "R") {
+        var rv = self._resBal(c);
+        if (!self._cero(rv)) out.push({cta: "", nom: "Resultado del ejercicio · balance de comprobación", v: rv});
+        return;
+      }
+      var b = B[r[0]];
+      if (!b) return;
+      var s = (r[1] === "D" ? b["S.DEUDOR"] : b["S.ACREEDOR"]) || 0;
+      if (self._cero(s)) return;
+      out.push({cta: r[0], nom: b.nombre, v: s * (r[2] || 1),
+                lado: r[1] === "D" ? "saldo deudor" : "saldo acreedor"});
+    });
+    return out;
+  },
+
+  _tablaEstado: function (titulo, sub, plantilla, cols, abre, pie) {
+    var self = this, ids = [];
+    var h = '<div class="d-carta"><h3 class="d-tit">' + esc(titulo) +
+      (sub ? '<span class="ob-sub"> · ' + esc(sub) + '</span>' : '') + '</h3>' +
+      '<div class="envoltura-tabla"><table class="datos cs-eeff sin-orden"><thead><tr><th>Cuenta</th>' +
+      cols.map(function (c) { return '<th class="num">' + esc(c.tit) + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    plantilla.forEach(function (f) {
+      var id = f[0], tipo = f[1];
+      if (tipo === "x") return;
+      if (tipo === "h" || tipo === "h2") {
+        h += '<tr class="cs-' + tipo + '"><td class="obra" colspan="' + (cols.length + 1) + '">' +
+          esc(f[2]) + '</td></tr>';
+        return;
+      }
+      if (f[5] && f[5].siHay && cols.every(function (c) { return !c.v || self._cero(c.v[id]); })) return;
+      var a = abre ? abre(f) : null;
+      if (a) ids.push(a);
+      var cls = [];
+      if (tipo === "t" || tipo === "T") cls.push("total");
+      if (tipo === "s") cls.push("cs-s");
+      if (f[5] && f[5].siHay) cls.push("cs-extra");
+      if (a) cls.push("abrible");
+      h += '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') +
+        (a ? ' data-abre="' + esc(a) + '" aria-expanded="false" tabindex="0" role="button"' : '') + '>' +
+        '<td class="obra' + (tipo === "i" ? ' cs-ind' : '') + '">' + esc(f[2]) + '</td>' +
+        cols.map(function (c) {
+          var x = c.v ? c.v[id] : null;
+          return '<td class="num' + (self._cero(x) ? ' cs-cero' : '') + '">' +
+            (c.v ? self._nf(x) : '') + '</td>';
+        }).join('') + '</tr>';
+    });
+    h += '</tbody></table></div>';
+    (pie || []).forEach(function (p) {
+      h += '<p class="mas cs-pie">' + p + '</p>';
+    });
+    h += '</div>';
+    ids.forEach(function (a) { h += '<div class="detalle" id="det-' + esc(a) + '"></div>'; });
+    return h;
+  },
+  /* Lo que no cuadra dentro de un estado, en líneas de datos. */
+  _pieDesc: function (val, fuente) {
+    var self = this, out = [];
+    if (!val) return out;
+    val.desc.forEach(function (d) {
+      out.push(esc(d.rot) + ' · suma de sus líneas ' + self._nf(d.suma) + ' · ' + esc(fuente) + ' ' +
+        self._nf(d.fuente) + ' · diferencia ' + self._nf(d.fuente - d.suma) + ' · Contabilidad');
+    });
+    (val.sueltas || []).forEach(function (x) {
+      out.push('Línea de ' + esc(fuente) + ' sin lugar en el formato · ' + esc(x.rot) + ' · ' + self._nf(x.v));
+    });
+    return out;
+  },
+
+  _esf: function (emp, c, mes) {
+    var self = this, prev = this._mesAntes(mes), cp = (emp.cierres || {})[prev];
+    var va = this._valESF(c), vp = cp && cp.esf ? this._valESF(cp) : null;
+    var cols = [{tit: this._alCierre(mes), v: va.v}];
+    if (vp) cols.push({tit: this._alCierre(prev), v: vp.v});
+    var abre = function (f) {
+      if (f[1] === "l" || f[1] === "i") {
+        return (!self._cero(va.v[f[0]]) || self._ctasEsf(c, f[0]).length) ? "cs-esf~" + f[0] : null;
+      }
+      return self._cero(va.v[f[0]]) ? null : "cs-esf~" + f[0];
+    };
+    var t = emp.nombre + ' · expresado en soles';
+    return '<div class="d-dos">' +
+      this._tablaEstado('Estado de situación financiera · Activos', t, this._ESF_A, cols, abre, []) +
+      this._tablaEstado('Estado de situación financiera · Pasivos y patrimonio', t, this._ESF_P, cols, abre,
+        this._pieDesc(va, "ContaSis")) + '</div>';
+  },
+
+  _cruceResultado: function (c) {
+    var ve = this._valER(c), vs = this._valESF(c), B = this._bal(c);
+    if (!ve || !vs) return null;
+    var b59 = B["59"];
+    var c59 = b59 ? (b59["S.ACREEDOR"] || 0) - (b59["S.DEUDOR"] || 0) : 0;
+    var er = ve.v.r_neta, esf = (vs.v.k_ra || 0) - c59;
+    return {er: er, ra: vs.v.k_ra || 0, c59: c59, esf: esf, dif: esf - er,
+            bal: this._resBal(c), c61: B["61"] ? this._naturaleza(B["61"]) : null};
+  },
+  _er: function (emp, c, mes) {
+    var self = this, prev = this._mesAntes(mes), cp = (emp.cierres || {})[prev];
+    var va = this._valER(c), vp = cp && cp.er ? this._valER(cp) : null;
+    var cols = [{tit: 'Al ' + this._alCierre(mes), v: va.v}];
+    if (vp) cols.push({tit: 'Al ' + this._alCierre(prev), v: vp.v});
+    var B = this._bal(c);
+    var abre = function (f) {
+      if (f[0] === "r_neta") return "cs-er~r_neta";
+      if (f[1] === "l" || f[1] === "i") {
+        var hay = (self._CTA_ER[f[0]] || []).some(function (k) { return !self._cero(self._funcion(B[k])); });
+        return (!self._cero(va.v[f[0]]) || hay) ? "cs-er~" + f[0] : null;
+      }
+      return self._cero(va.v[f[0]]) ? null : "cs-er~" + f[0];
+    };
+    var pie = this._pieDesc(va, "ContaSis");
+    var x = this._cruceResultado(c);
+    if (x && !this._cero(x.dif)) {
+      pie.push('Ganancia neta · Estado de resultados ' + this._nf(x.er) +
+        ' · Estado de situación financiera ' + this._nf(x.esf) + ' (resultados acumulados − cuenta 59)' +
+        ' · diferencia ' + this._nf(x.dif) +
+        (x.c61 !== null && Math.abs(x.c61 - x.dif) < 0.005 ? ' = cuenta 61 del balance' : '') +
+        ' · Contabilidad');
+    }
+    var t = emp.nombre + ' · por función · expresado en soles';
+    var h = this._tablaEstado('Estado de resultados', t, this._ER_F, cols,
+      abre, pie);
+    /* el de naturaleza, como lo entrega ContaSis */
+    var fuerte = function (s) {
+      var z = String(s || "");
+      return z === z.toUpperCase() || /^(Ganancia|Resultado)/i.test(z);
+    };
+    return h + this._tablaLineas('Por naturaleza · ' + esc(emp.nombre) + ' · al ' +
+      esc(this._alCierre(mes)) + ' · ContaSis', c.er.naturaleza, fuerte);
+  },
+
+  _PAT: [["k_cap", "Capital Emitido"], ["k_prim", "Primas de Emisión"],
+         ["k_accinv", "Acciones de Inversión"], ["k_accprop", "Acciones Propias en Cartera"],
+         ["k_orc", "Otras Reservas de Capital"], ["k_ra", "Resultados Acumulados"],
+         ["k_orp", "Otras Reservas de Patrimonio"]],
+  _epnFilas: function (emp, c, mes) {
+    var prev = this._mesAntes(mes), cp = emp.cierres[prev];
+    var A = this._valESF(cp).v, B = this._valESF(c).v;
+    var res = this._valER(c).v.r_neta - this._valER(cp).v.r_neta;
+    var ks = this._PAT.map(function (p) { return p[0]; });
+    var fila = function (f) { var o = {}; ks.forEach(function (k) { o[k] = f ? f(k) : 0; }); return o; };
+    var ini = fila(function (k) { return A[k] || 0; }), fin = fila(function (k) { return B[k] || 0; });
+    var d = function (k) { return fin[k] - ini[k]; };
+    var solo = function (k2, v) { return fila(function (k) { return k === k2 ? v : 0; }); };
+    var r6 = solo("k_ra", res), r7 = solo("k_orp", d("k_orp"));
+    var r8 = fila(function (k) { return r6[k] + r7[k]; });
+    var r10 = fila(function (k) { return k === "k_cap" || k === "k_prim" ? d(k) : 0; });
+    var r11 = solo("k_accinv", d("k_accinv")), r20 = solo("k_accprop", d("k_accprop"));
+    var r21 = solo("k_orc", d("k_orc")), dif = solo("k_ra", d("k_ra") - res);
+    var tot = fila(function (k) { return d(k); });
+    var fin1 = this._alCierre(prev).split("-"), fin2 = this._alCierre(mes).split("-");
+    var larga = function (p) {
+      return "SALDOS AL " + p[0] + " DE " + this._MESN[this._MESC.indexOf(p[1])].toUpperCase() + " DE " + p[2];
+    }.bind(this);
+    return [
+      ["h0", "T", larga(fin1), ini],
+      ["e1", "l", "1. Cambios en Políticas Contables", fila()],
+      ["e2", "l", "2. Corrección de Errores", fila()],
+      ["e3", "s", "3. Saldo Inicial Reexpresado", ini],
+      ["e4", "h2", "4. Cambios en Patrimonio:"],
+      ["e5", "h2", "5. Resultado Integral:"],
+      ["e6", "l", "6. Ganancia (Pérdida) Neta del Período", r6, "cs-epn~res"],
+      ["e7", "l", "7. Otro Resultado Integral", r7],
+      ["e8", "s", "8. Total Resultado Integral del Período, neto de Impuesto", r8],
+      ["e9", "l", "9. Dividendos en Efectivo Declarados", fila()],
+      ["e10", "l", "10. Emisión (reducción) de patrimonio", r10],
+      ["e11", "l", "11. Reducción o Amortización de Acciones de Inversión", r11],
+      ["e12", "l", "12. Incremento (Disminución) por otras Aportaciones de los Propietarios", fila()],
+      ["e13", "l", "13. Disminución (Incremento) por otras Distribuciones a los Propietarios", fila()],
+      ["e14", "l", "14. Incremento (Disminución) por cambios en las participaciones de subsidiarias que no impliquen pérdida de control", fila()],
+      ["e15", "l", "15. Importe eliminado de reservas de coberturas de flujos de efectivo e incluido en el costo inicial u otro importe en libros de activos (pasivos) no financieros o compromisos en firme para los que se aplica la contabilidad de coberturas del valor razonable", fila()],
+      ["e16", "l", "16. Importe eliminado de reservas de cambios en el valor temporal del dinero de opciones e incluido en el costo inicial u otro importe en libros de activos (pasivos) no financieros o compromisos en firme para los que se aplica la contabilidad de coberturas del valor razonable", fila()],
+      ["e17", "l", "17. Importe eliminado de reservas de cambios en el valor de los elementos a término de contratos a término e incluido en el costo inicial u otro importe en libros de activos (pasivos) no financieros o compromisos en firme para los que se aplica la contabilidad de coberturas del valor razonable", fila()],
+      ["e18", "l", "18. Importe eliminado de reservas de cambios en el valor de los diferenciales de tasa cambio de moneda extranjera e incluido en el costo inicial u otro importe en libros de activos (pasivos) no financieros o compromisos en firme para los que se aplica la contabilidad de coberturas del valor razonable", fila()],
+      ["e19", "l", "19. Incremento (Disminución) por transacciones con pagos basados en acciones", fila()],
+      ["e20", "l", "20. Incremento (Disminución) por transacciones con acciones propias en cartera", r20],
+      ["e21", "l", "21. Incremento (Disminución) por Transferencia y Otros Cambios de patrimonio", r21],
+      ["edif", "x", "Diferencia entre el Estado de Resultados y el Estado de Situación Financiera", dif, "cs-epn~dif"],
+      ["etot", "s", "Total incremento (disminución) en el patrimonio", tot],
+      ["h1", "T", larga(fin2), fin]
+    ];
+  },
+  _epn: function (emp, c, mes) {
+    var self = this, filas = this._epnFilas(emp, c, mes), ids = [];
+    var ks = this._PAT.map(function (p) { return p[0]; });
+    var suma = function (o) { return ks.reduce(function (a, k) { return a + (o[k] || 0); }, 0); };
+    var h = '<div class="d-carta"><h3 class="d-tit">Estado de cambios en el patrimonio neto' +
+      '<span class="ob-sub"> · ' + esc(emp.nombre) + ' · del ' + esc(this._alCierre(this._mesAntes(mes))) +
+      ' al ' + esc(this._alCierre(mes)) + ' · expresado en soles</span></h3>' +
+      '<div class="envoltura-tabla"><table class="datos cs-eeff cs-epn sin-orden"><thead><tr><th>Cuenta</th>' +
+      this._PAT.map(function (p) { return '<th class="num">' + esc(p[1]) + '</th>'; }).join('') +
+      '<th class="num">Total Patrimonio</th></tr></thead><tbody>';
+    filas.forEach(function (f) {
+      var tipo = f[1];
+      if (tipo === "h2") {
+        h += '<tr class="cs-h2"><td class="obra" colspan="' + (ks.length + 2) + '">' + esc(f[2]) + '</td></tr>';
+        return;
+      }
+      if (tipo === "x" && self._cero(suma(f[3]))) return;
+      var a = f[4] && !self._cero(suma(f[3])) ? f[4] : null;
+      if (a) ids.push(a);
+      var cls = [];
+      if (tipo === "T") cls.push("total");
+      if (tipo === "s") cls.push("cs-s");
+      if (tipo === "x") cls.push("cs-extra");
+      if (a) cls.push("abrible");
+      h += '<tr' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') +
+        (a ? ' data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button"' : '') +
+        '><td class="obra">' + esc(f[2]) + '</td>' +
+        ks.concat(["_t"]).map(function (k) {
+          var v = k === "_t" ? suma(f[3]) : f[3][k];
+          return '<td class="num' + (self._cero(v) ? ' cs-cero' : '') + '">' + self._nf(v) + '</td>';
+        }).join('') + '</tr>';
+    });
+    h += '</tbody></table></div></div>';
+    ids.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+    return h;
+  },
+
+  _GRUPO: /habitat|corporacion|constructora|escalar|velasco|yean/,
+  _efeLinea: function (cta, desc) {
+    var c = String(cta || ""), g = this._GRUPO.test(this._norm(desc));
+    var r = function (e, s) { return {ent: e, sal: s || e}; };
+    if (/^10/.test(c)) return r("mov10");
+    if (/^1[23]/.test(c) || /^70/.test(c)) return r("op_c_ventas");
+    if (/^14/.test(c)) return r("in_c_terc", "in_p_terc");
+    if (/^167[12]/.test(c)) return r("op_imp");
+    if (/^1[67]/.test(c)) return g ? r("in_c_rel", "in_p_rel") : r("in_c_terc", "in_p_terc");
+    if (/^18/.test(c)) return r("op_c_otros", "op_p_otros");
+    if (/^2/.test(c)) return r("op_c_otros", "op_p_prov");
+    if (/^30/.test(c)) return r("in_c_instr", "in_p_instr");
+    if (/^31/.test(c)) return r("in_c_olp", "in_p_olp");
+    if (/^3[23]/.test(c)) return r("in_c_ppe", "in_p_ppe");
+    if (/^34/.test(c)) return r("in_c_intang", "in_p_intang");
+    if (/^3/.test(c)) return r("op_c_otros", "op_p_otros");
+    if (/^4017/.test(c)) return r("op_imp");
+    if (/^40[37]/.test(c) || /^41/.test(c)) return r("op_c_otros", "op_p_emp");
+    if (/^40/.test(c)) return r("op_c_otros", "op_p_otros");
+    if (/^4[23]/.test(c)) return r("op_c_otros", "op_p_prov");
+    if (/^44/.test(c)) return r("fi_c_rel", "fi_p_rel");
+    if (/^45/.test(c)) return r("fi_c_prest", "fi_p_amort");
+    if (/^4[67]/.test(c)) return g ? r("fi_c_rel", "fi_p_rel") : r("op_c_otros", "op_p_otros");
+    if (/^4/.test(c)) return r("op_c_otros", "op_p_otros");
+    if (/^5[0-2]/.test(c)) return r("fi_c_acc", "fi_otros");
+    if (/^59/.test(c)) return r("fi_otros", "fi_p_div");
+    if (/^5/.test(c)) return r("fi_otros");
+    if (/^62/.test(c)) return r("op_c_otros", "op_p_emp");
+    if (/^6[0139]/.test(c)) return r("op_c_otros", "op_p_prov");
+    if (/^67/.test(c)) return r("fi_otros", "fi_p_int");
+    if (/^6/.test(c)) return r("op_c_otros", "op_p_otros");
+    if (/^776/.test(c)) return r("tc");
+    if (/^77/.test(c)) return r("in_c_int", "in_otros");
+    if (/^7/.test(c)) return r("op_c_otros", "op_p_otros");
+    if (/^88/.test(c)) return r("op_imp");
+    return r("op_otros");
+  },
+  _valEFE: function (cj) {
+    if (!cj) return null;
+    var self = this, base = {}, subs = {};
+    (cj.cuentas || []).forEach(function (x) {
+      var r = self._efeLinea(x.cuenta, x.descripcion);
+      if (!self._cero(x.debe)) {
+        base[r.ent] = (base[r.ent] || 0) + x.debe;
+        (subs[r.ent] = subs[r.ent] || []).push({c: x, v: x.debe});
+      }
+      if (!self._cero(x.haber)) {
+        base[r.sal] = (base[r.sal] || 0) - x.haber;
+        (subs[r.sal] = subs[r.sal] || []).push({c: x, v: -x.haber});
+      }
+    });
+    base.ini = cj.inicial;
+    var r = this._evaluar(this._EFE, function (f) {
+      if (f[0] === "fin") return cj.final;
+      return f[1] === "l" ? (base[f[0]] || 0) : null;
+    });
+    r.subs = subs;
+    return r;
+  },
+  _efe: function (emp, mes) {
+    var self = this, prev = this._mesAntes(mes);
+    var cj = emp.caja[mes], cjp = (emp.caja || {})[prev];
+    var va = this._valEFE(cj), vp = cjp ? this._valEFE(cjp) : null;
+    var cols = [{tit: this._mesTxt(mes), v: va.v}];
+    if (vp) cols.push({tit: this._mesTxt(prev), v: vp.v});
+    var abre = function (f) {
+      if (f[0] === "ini" || f[0] === "fin") return "cs-efe~" + f[0];
+      return self._cero(va.v[f[0]]) ? null : "cs-efe~" + f[0];
+    };
+    var pie = this._pieDesc(va, "libro caja");
+    var c = (emp.cierres || {})[mes];
+    var ve = c && c.esf ? this._valESF(c) : null;
+    if (ve && !this._cero(ve.v.a_efe - cj.final)) {
+      pie.push('Efectivo al finalizar · libro caja ' + this._nf(cj.final) +
+        ' · Estado de situación financiera ' + this._nf(ve.v.a_efe) +
+        ' · diferencia ' + this._nf(ve.v.a_efe - cj.final) + ' · Contabilidad');
+    }
+    if (!this._cero(cj.vs_anterior)) {
+      pie.push('Efectivo al inicio · libro caja ' + this._nf(cj.inicial) + ' · cierre del libro caja de ' +
+        esc(this._mesTxt(prev)) + ' ' + this._nf(cj.inicial - cj.vs_anterior) +
+        ' · diferencia ' + this._nf(cj.vs_anterior) + ' · Contabilidad');
+    }
+    return this._tablaEstado('Estado de flujo de efectivo', emp.nombre +
+      ' · método directo · desde el libro caja · expresado en soles', this._EFE, cols, abre, pie);
+  },
+
+  _valORI: function (c) {
+    var ve = this._valER(c);
+    if (!ve) return null;
+    return this._evaluar(this._ORI, function (f) {
+      return f[0] === "o_neta" ? ve.v.r_neta : (f[1] === "l" || f[1] === "i" ? 0 : null);
+    });
+  },
+  _ori: function (emp, c, mes) {
+    var self = this, prev = this._mesAntes(mes), cp = (emp.cierres || {})[prev];
+    var va = this._valORI(c), vp = cp && cp.er ? this._valORI(cp) : null;
+    var cols = [{tit: 'Al ' + this._alCierre(mes), v: va.v}];
+    if (vp) cols.push({tit: 'Al ' + this._alCierre(prev), v: vp.v});
+    var abre = function (f) {
+      if (f[0] === "o_neta") return "cs-er~r_neta";
+      if (f[0] === "o_tot") return "cs-ori~o_tot";
+      return null;
+    };
+    var B = this._bal(c), pie = [];
+    ["56", "57"].forEach(function (k) {
+      var b = B[k];
+      var s = b ? (b["S.ACREEDOR"] || 0) - (b["S.DEUDOR"] || 0) : 0;
+      if (!self._cero(s)) pie.push('Cuenta ' + k + ' con saldo en el balance ' + self._nf(s) +
+        ' · el otro resultado integral del período no sale del saldo · Contabilidad');
+    });
+    return this._tablaEstado('Estado de resultados integrales', emp.nombre +
+      ' · expresado en soles', this._ORI, cols, abre, pie);
+  },
+
+  _NOMDIARIO: function (cj) {
+    var nom = {};
+    ((cj && cj.cuentas) || []).forEach(function (c) { nom[c.cuenta] = c.descripcion; });
+    return nom;
+  },
+  /* Los asientos de caja que cumplen `pasa(fila)`, con su total. */
+  _tablaAsientos: function (titulo, cj, pasa) {
+    var cols = (this._D.contasis_mensual || {}).diario_cols || [], ix = {};
+    cols.forEach(function (c, i) { ix[c] = i; });
+    var nom = this._NOMDIARIO(cj);
+    var filas = ((cj && cj.diario) || []).filter(function (f) { return pasa(f, ix); });
+    var h = '<h4 class="cs-h4">' + esc(titulo) + ' · ' + ent(filas.length) +
+      (filas.length === 1 ? ' asiento' : ' asientos') + '</h4>' +
+      '<div class="envoltura-tabla"><table class="datos">' +
+      '<thead><tr><th>Fecha · asiento</th><th>Cuenta</th><th>Empresa · comprobante</th>' +
+      '<th class="num">Entradas</th><th class="num">Salidas</th></tr></thead><tbody>';
+    var td = 0, th = 0;
+    filas.forEach(function (f) {
+      var d = f[ix.debe] || 0, hb = f[ix.haber] || 0;
+      td += d; th += hb;
+      var emp2 = f[ix.empresa] ? esc(f[ix.empresa]) +
+        (f[ix.numero] ? '<span class="ob-sub"> · ' + esc(f[ix.numero]) + '</span>' : '') : '';
+      h += '<tr><td class="gris">' + esc(f[ix.fecha]) + '<span class="ob-sub"> · ' +
+        esc(f[ix.sd] + '-' + f[ix.asiento]) + ' · doc. ' + esc(f[ix.doc]) + '</span></td>' +
+        '<td class="obra">' + esc(f[ix.cuenta]) + ' · ' + esc(nom[f[ix.cuenta]] || '') +
+        '</td><td class="obra">' + emp2 + '</td><td class="num">' + (d ? soles(d) : '') +
+        '</td><td class="num">' + (hb ? soles(hb) : '') + '</td></tr>';
+    });
+    return h + '<tr class="total"><td colspan="3" class="obra">TOTAL</td><td class="num">' +
+      soles(td) + '</td><td class="num">' + soles(th) + '</td></tr></tbody></table></div>';
+  },
+  /* Subcuentas de caja: cada una abre sus asientos (`base~s~<subcuenta>`). */
+  _tablaSubs: function (titulo, subs, base, cj) {
+    var ids = [], td = 0, th = 0, n = 0, conAs = !!(cj && (cj.diario || []).length);
+    var h = '<h4 class="cs-h4">' + esc(titulo) + '</h4><div class="envoltura-tabla"><table class="datos">' +
+      '<thead><tr><th>Subcuenta</th><th>Descripción</th><th class="num">Entradas</th>' +
+      '<th class="num">Salidas</th><th class="num">Asientos</th></tr></thead><tbody>';
+    subs.forEach(function (x) {
+      var a = conAs ? base + "~s~" + x.cuenta : null;
+      if (a) ids.push(a);
+      td += x.debe || 0; th += x.haber || 0; n += x.filas || 0;
+      h += '<tr' + (a ? ' class="abrible" data-abre="' + esc(a) + '" aria-expanded="false" tabindex="0" role="button"' : '') + '>' +
+        '<td class="gris">' + esc(x.cuenta) + '</td><td class="obra">' + esc(x.descripcion) +
+        '</td><td class="num">' + (x.debe ? soles(x.debe) : '') + '</td><td class="num">' +
+        (x.haber ? soles(x.haber) : '') + '</td><td class="num">' + ent(x.filas) + '</td></tr>';
+    });
+    h += '<tr class="total"><td></td><td class="obra">TOTAL</td><td class="num">' + soles(td) +
+      '</td><td class="num">' + soles(th) + '</td><td class="num">' + ent(n) + '</td></tr></tbody></table></div>';
+    ids.forEach(function (a) { h += '<div class="detalle" id="det-' + esc(a) + '"></div>'; });
+    return h;
+  },
+  _tablaTipos: function (titulo, cj, base) {
+    var ids = [], n = 0, conAs = (cj.diario || []).length > 0;
+    var h = '<h4 class="cs-h4">' + esc(titulo) + '</h4><div class="envoltura-tabla"><table class="datos">' +
+      '<thead><tr><th>Cuenta</th><th>Plan contable</th><th class="num">Entradas</th>' +
+      '<th class="num">Salidas</th><th class="num">Asientos</th></tr></thead><tbody>';
+    (cj.tipos || []).forEach(function (x) {
+      var a = conAs ? base + "~t~" + x.cuenta : null;
+      if (a) ids.push(a);
+      n += x.filas || 0;
+      h += '<tr' + (a ? ' class="abrible" data-abre="' + esc(a) + '" aria-expanded="false" tabindex="0" role="button"' : '') + '>' +
+        '<td class="gris">' + esc(x.cuenta) + '</td><td class="obra">' + esc(x.nombre) +
+        '</td><td class="num">' + (x.debe ? soles(x.debe) : '') + '</td><td class="num">' +
+        (x.haber ? soles(x.haber) : '') + '</td><td class="num">' + ent(x.filas) + '</td></tr>';
+    });
+    h += '<tr class="total"><td></td><td class="obra">TOTAL</td><td class="num">' + soles(cj.debe) +
+      '</td><td class="num">' + soles(cj.haber) + '</td><td class="num">' + ent(n) + '</td></tr></tbody></table></div>';
+    ids.forEach(function (a) { h += '<div class="detalle" id="det-' + esc(a) + '"></div>'; });
+    return h;
+  },
+  /* Los comprobantes de un mes de un registro. */
+  _tablaComprobantes: function (titulo, rg, mes) {
+    var cols = rg.filas_cols || [], ix = {};
+    cols.forEach(function (c, i) { ix[c] = i; });
+    var filas = (rg.filas || []).filter(function (f) { return String(f[ix.fecha] || "").slice(0, 7) === mes; });
+    if (!filas.length) return '';
+    var t = {base: 0, igv: 0, otros: 0, total: 0};
+    var h = '<h4 class="cs-h4">' + esc(titulo) + ' · ' + ent(filas.length) +
+      (filas.length === 1 ? ' comprobante' : ' comprobantes') + '</h4>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Fecha</th>' +
+      '<th>Comprobante</th><th>Razón social</th><th class="num">Base imponible</th>' +
+      '<th class="num">IGV</th><th class="num">Otros</th><th class="num">Total</th></tr></thead><tbody>';
+    filas.forEach(function (f) {
+      Object.keys(t).forEach(function (k) { t[k] += f[ix[k]] || 0; });
+      h += '<tr><td class="gris">' + esc(f[ix.fecha]) + '</td><td class="gris">' + esc(f[ix.doc]) +
+        (f[ix.numero] ? ' · ' + esc(f[ix.numero]) : '') + '</td><td class="obra">' + esc(f[ix.empresa]) +
+        '</td><td class="num">' + soles(f[ix.base]) + '</td><td class="num">' + soles(f[ix.igv]) +
+        '</td><td class="num">' + soles(f[ix.otros]) + '</td><td class="num">' + soles(f[ix.total]) + '</td></tr>';
+    });
+    return h + '<tr class="total"><td colspan="3" class="obra">TOTAL</td><td class="num">' + soles(t.base) +
+      '</td><td class="num">' + soles(t.igv) + '</td><td class="num">' + soles(t.otros) +
+      '</td><td class="num">' + soles(t.total) + '</td></tr></tbody></table></div>';
+  },
+  _regDe: function (cta) {
+    if (cta === "42" || cta === "60") return "compras";
+    if (cta === "12" || cta === "70") return "ventas";
+    return null;
+  },
+  _hayRegistro: function (emp, cta, mes) {
+    var t = this._regDe(cta), rg = t ? (emp.registros || {})[t] : null;
+    return !!(rg && rg.meses && rg.meses[mes] && (rg.filas || []).length);
+  },
+  _subsDe: function (cj, cta) {
+    return ((cj && cj.cuentas) || []).filter(function (x) { return x.cuenta.indexOf(cta) === 0; });
+  },
+  _hayPanel: function (emp, mes, cta) {
+    var cj = (emp.caja || {})[mes];
+    if (cta === "10") return !!cj;
+    return this._subsDe(cj, cta).length > 0 || this._hayRegistro(emp, cta, mes);
+  },
+  _panelCuenta: function (emp, mes, cta, base) {
+    var h = '', cj = (emp.caja || {})[mes], mt = this._mesTxt(mes);
+    if (cta === "10" && cj) {
+      h += '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Libro caja · ' + esc(mt) +
+        '</th><th class="num">Monto</th></tr></thead><tbody>' +
+        '<tr><td class="obra">Saldo inicial</td><td class="num">' + soles(cj.inicial) + '</td></tr>' +
+        '<tr><td class="obra">Entradas</td><td class="num">' + soles(cj.debe) + '</td></tr>' +
+        '<tr><td class="obra">Salidas</td><td class="num">' + soles(cj.haber) + '</td></tr>' +
+        '<tr class="total"><td class="obra">Saldo final</td><td class="num">' + soles(cj.final) +
+        '</td></tr></tbody></table></div>';
+      h += this._tablaTipos('Por contrapartida · ' + mt, cj, base);
+    } else if (cj) {
+      var subs = this._subsDe(cj, cta);
+      if (subs.length) h += this._tablaSubs('Movimientos de caja de la cuenta ' + cta + ' · ' + mt, subs, base, cj);
+    }
+    var t = this._regDe(cta);
+    if (t && this._hayRegistro(emp, cta, mes)) {
+      h += this._tablaComprobantes((t === "compras" ? 'Registro de compras · ' : 'Registro de ventas · ') + mt,
+        emp.registros[t], mes);
+    }
+    return h;
+  },
+  /* Las cuentas del balance en una tabla, cada una abriendo su panel. */
+  _tablaCtas: function (emp, mes, filas, base, pieFilas) {
+    var self = this, ids = [];
+    var h = '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Cuenta</th>' +
+      '<th>Nombre</th><th class="num">Saldo en el balance</th></tr></thead><tbody>';
+    filas.forEach(function (x) {
+      var a = x.cta && self._hayPanel(emp, mes, x.cta) ? base + "~" + x.cta : null;
+      if (a) ids.push(a);
+      h += '<tr' + (a ? ' class="abrible" data-abre="' + esc(a) + '" aria-expanded="false" tabindex="0" role="button"' : '') +
+        '><td class="gris">' + esc(x.cta) + '</td><td class="obra">' + esc(x.nom) +
+        (x.lado ? '<span class="ob-sub"> · ' + esc(x.lado) + '</span>' : '') +
+        '</td><td class="num">' + self._nf(x.v) + '</td></tr>';
+    });
+    (pieFilas || []).forEach(function (p) {
+      h += '<tr class="' + (p[2] || 'total') + '"><td></td><td class="obra">' + esc(p[0]) +
+        '</td><td class="num">' + self._nf(p[1]) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    ids.forEach(function (a) { h += '<div class="detalle" id="det-' + esc(a) + '"></div>'; });
+    return h;
+  },
+  /* Un total: sus partes, y el total de la fuente si no cuadran. */
+  _detPartes: function (plantilla, val, id, titulo, fuente) {
+    var self = this, f = this._fila(plantilla, id);
+    var h = '<h3>' + esc(titulo) + '</h3><div class="envoltura-tabla"><table class="datos">' +
+      '<thead><tr><th>Línea</th><th class="num">Importe</th></tr></thead><tbody>';
+    var suma = 0;
+    (f[4] || []).forEach(function (k) {
+      var g = self._fila(plantilla, k), v = val.v[k] || 0;
+      suma += v;
+      if (self._cero(v)) return;
+      h += '<tr><td class="obra">' + esc(g ? g[2] : k) + '</td><td class="num">' + self._nf(v) + '</td></tr>';
+    });
+    h += '<tr class="total"><td class="obra">' + esc(f[2]) + (val.calc[id] ? ' · suma de sus líneas' : '') +
+      '</td><td class="num">' + self._nf(val.v[id]) + '</td></tr>';
+    if (!val.calc[id] && !self._cero(val.v[id] - suma)) {
+      h += '<tr style="color:var(--rojo)"><td class="obra">Suma de sus líneas ' + self._nf(suma) +
+        ' · diferencia con ' + esc(fuente) + '</td><td class="num">' + self._nf(val.v[id] - suma) + '</td></tr>';
+    }
+    return h + '</tbody></table></div>';
+  },
+
+  _detEsf: function (emp, mes, id, p) {
+    var t = '<button class="cerrar">Cerrar</button>';
+    /* la cuenta de dos dígitos abierta desde la línea */
+    if (p.length > 2) {
+      var pc = this._panelCuenta(emp, mes, p[2], p.join("~"));
+      return pc ? t + pc : null;
+    }
+    var c = emp.cierres[mes], plant = this._ESF_A.concat(this._ESF_P), f = this._fila(plant, id);
+    if (!f) return null;
+    var val = this._valESF(c);
+    var cab = f[2] + ' · ' + emp.nombre + ' · al ' + this._alCierre(mes);
+    if (f[1] !== "l" && f[1] !== "i") return t + this._detPartes(plant, val, id, cab, "ContaSis");
+    var filas = this._ctasEsf(c, id), suma = 0;
+    filas.forEach(function (x) { suma += x.v; });
+    var pie = [];
+    if (filas.length > 1) pie.push(["Suma de las cuentas", suma, "cs-s"]);
+    pie.push([f[2] + " · Estado de situación financiera", val.v[id], "total"]);
+    if (!this._cero(val.v[id] - suma))
+      pie.push(["Diferencia con el balance a dos dígitos", val.v[id] - suma, "cs-extra"]);
+    return t + '<h3>' + esc(cab) + '</h3>' + this._tablaCtas(emp, mes, filas, "cs-esf~" + id, pie);
+  },
+  _detEr: function (emp, mes, id, p) {
+    var t = '<button class="cerrar">Cerrar</button>';
+    if (p.length > 2) {
+      var pc = this._panelCuenta(emp, mes, p[2], p.join("~"));
+      return pc ? t + pc : null;
+    }
+    var self = this, c = emp.cierres[mes], f = this._fila(this._ER_F, id);
+    if (!f) return null;
+    var val = this._valER(c), B = this._bal(c);
+    var cab = f[2] + ' · ' + emp.nombre + ' · al ' + this._alCierre(mes);
+    if (id === "r_neta") {
+      var x = this._cruceResultado(c);
+      var h = t + '<h3>' + esc(cab) + '</h3><div class="envoltura-tabla"><table class="datos">' +
+        '<thead><tr><th>Dónde está</th><th class="num">Importe</th></tr></thead><tbody>' +
+        '<tr class="total"><td class="obra">Estado de resultados · Ganancia (Pérdida) Neta del Ejercicio</td><td class="num">' +
+        this._nf(x.er) + '</td></tr>' +
+        '<tr><td class="obra">Estado de situación financiera · Resultados Acumulados</td><td class="num">' +
+        this._nf(x.ra) + '</td></tr>' +
+        '<tr><td class="obra">Balance · cuenta 59 · Resultados acumulados de ejercicios anteriores</td><td class="num">' +
+        this._nf(x.c59) + '</td></tr>' +
+        '<tr class="cs-s"><td class="obra">Ganancia que lleva el Estado de situación financiera (Resultados Acumulados − cuenta 59)</td><td class="num">' +
+        this._nf(x.esf) + '</td></tr>' +
+        (x.bal !== null ? '<tr><td class="obra">Balance de comprobación · resultado del ejercicio</td><td class="num">' +
+          this._nf(x.bal) + '</td></tr>' : '');
+      if (!this._cero(x.dif)) {
+        h += '<tr class="cs-extra"><td class="obra">Diferencia entre los dos estados</td><td class="num">' +
+          this._nf(x.dif) + '</td></tr>';
+        if (x.c61 !== null) h += '<tr><td class="obra">Balance · cuenta 61 · Variación de existencias (por naturaleza)</td><td class="num">' +
+          this._nf(x.c61) + '</td></tr>';
+      }
+      return h + '</tbody></table></div>';
+    }
+    if (f[1] !== "l" && f[1] !== "i") return t + this._detPartes(this._ER_F, val, id, cab, "ContaSis");
+    var juntas = this._ER_JUNTAS[id] || [id];
+    var filas = [], suma = 0;
+    (this._CTA_ER[id] || []).forEach(function (k) {
+      var b = B[k], v = self._funcion(b);
+      if (!b || self._cero(v)) return;
+      filas.push({cta: k, nom: b.nombre, v: v, lado: "por función"});
+      suma += v;
+    });
+    var enEr = juntas.reduce(function (a, k) { return a + (val.v[k] || 0); }, 0);
+    var pie = [];
+    if (juntas.length > 1) {
+      juntas.forEach(function (k) {
+        pie.push([self._fila(self._ER_F, k)[2] + " · Estado de resultados", val.v[k] || 0, "cs-s"]);
+      });
+      pie.push(["Las dos líneas juntas", enEr, "total"]);
+    } else pie.push([f[2] + " · Estado de resultados", enEr, "total"]);
+    if (!this._cero(enEr - suma)) pie.push(["Diferencia con el balance", enEr - suma, "cs-extra"]);
+    var h2 = t + '<h3>' + esc(cab) + '</h3>' + this._tablaCtas(emp, mes, filas, "cs-er~" + id, pie);
+    /* el costo de ventas, además, contra las cuentas de compras y variación */
+    if (id === "r_cv") {
+      var nat = ["60", "61", "69"].filter(function (k) { return B[k] && !self._cero(self._naturaleza(B[k])); })
+        .map(function (k) { return {cta: k, nom: B[k].nombre, v: self._naturaleza(B[k]), lado: "por naturaleza"}; });
+      if (nat.length) {
+        var sn = nat.reduce(function (a, x) { return a + x.v; }, 0);
+        h2 += '<h4 class="cs-h4">Compras y variación de existencias · por naturaleza</h4>' +
+          this._tablaCtas(emp, mes, nat, "cs-er~r_cvn", [["Suma", sn, "total"]]);
+      }
+    }
+    return h2;
+  },
+  _detEfe: function (emp, mes, id, p) {
+    var self = this, cj = emp.caja[mes], t = '<button class="cerrar">Cerrar</button>';
+    var val = this._valEFE(cj), f = this._fila(this._EFE, id);
+    if (!f) return null;
+    var cab = f[2] + ' · ' + emp.nombre + ' · ' + this._mesTxt(mes);
+    if (id === "ini" || id === "fin") {
+      var c = (emp.cierres || {})[id === "ini" ? this._mesAntes(mes) : mes];
+      var ve = c && c.esf ? this._valESF(c) : null, B = this._bal(c), b10 = B["10"];
+      var h = t + '<h3>' + esc(cab) + '</h3><div class="envoltura-tabla"><table class="datos">' +
+        '<thead><tr><th>Dónde está</th><th class="num">Importe</th></tr></thead><tbody>' +
+        '<tr class="total"><td class="obra">Libro caja · saldo ' + (id === "ini" ? 'inicial' : 'final') +
+        '</td><td class="num">' + this._nf(id === "ini" ? cj.inicial : cj.final) + '</td></tr>';
+      if (id === "ini" && cj.vs_anterior !== undefined && cj.vs_anterior !== null)
+        h += '<tr><td class="obra">Libro caja de ' + esc(this._mesTxt(this._mesAntes(mes))) +
+          ' · saldo final</td><td class="num">' + this._nf(cj.inicial - cj.vs_anterior) + '</td></tr>';
+      if (b10) h += '<tr><td class="obra">Balance · cuenta 10 · al ' + esc(this._alCierre(id === "ini" ? this._mesAntes(mes) : mes)) +
+        '</td><td class="num">' + this._nf((b10["S.DEUDOR"] || 0) - (b10["S.ACREEDOR"] || 0)) + '</td></tr>';
+      if (ve) h += '<tr><td class="obra">Estado de situación financiera · Efectivo y Equivalentes al Efectivo</td><td class="num">' +
+        this._nf(ve.v.a_efe) + '</td></tr>';
+      return h + '</tbody></table></div>';
+    }
+    if (f[1] !== "l" && f[1] !== "i") return t + this._detPartes(this._EFE, val, id, cab, "libro caja");
+    var subs = (val.subs[id] || []).slice().sort(function (a, b) { return Math.abs(b.v) - Math.abs(a.v); });
+    var ids = [], suma = 0;
+    var h3 = t + '<h3>' + esc(cab) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Subcuenta</th><th>Descripción</th><th class="num">Importe en la línea</th>' +
+      '<th class="num">Asientos</th></tr></thead><tbody>';
+    var conAs = (cj.diario || []).length > 0;
+    subs.forEach(function (s) {
+      var a = conAs ? "cs-efe~" + id + "~s~" + s.c.cuenta : null;
+      if (a) ids.push(a);
+      suma += s.v;
+      h3 += '<tr' + (a ? ' class="abrible" data-abre="' + esc(a) + '" aria-expanded="false" tabindex="0" role="button"' : '') + '>' +
+        '<td class="gris">' + esc(s.c.cuenta) + '</td><td class="obra">' + esc(s.c.descripcion) +
+        '<span class="ob-sub"> · ' + (s.v >= 0 ? 'entrada' : 'salida') + '</span></td><td class="num">' +
+        self._nf(s.v) + '</td><td class="num">' + ent(s.c.filas) + '</td></tr>';
+    });
+    h3 += '<tr class="total"><td></td><td class="obra">' + esc(f[2]) + '</td><td class="num">' +
+      this._nf(suma) + '</td><td></td></tr></tbody></table></div>';
+    ids.forEach(function (a) { h3 += '<div class="detalle" id="det-' + esc(a) + '"></div>'; });
+    return h3;
+  },
+  _detEpn: function (emp, mes, id) {
+    var c = emp.cierres[mes], prev = this._mesAntes(mes), cp = emp.cierres[prev];
+    var t = '<button class="cerrar">Cerrar</button>', self = this;
+    var a = this._cruceResultado(cp), b = this._cruceResultado(c);
+    var fila = function (rot, x, y, cls) {
+      return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td class="obra">' + esc(rot) +
+        '</td><td class="num">' + self._nf(x) + '</td><td class="num">' + self._nf(y) +
+        '</td><td class="num">' + self._nf(y - x) + '</td></tr>';
+    };
+    var h = t + '<h3>' + (id === "res" ? 'Ganancia (Pérdida) Neta del Período' : 'Diferencia entre el Estado de Resultados y el Estado de Situación Financiera') +
+      ' · ' + esc(emp.nombre) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Dónde está</th><th class="num">Al ' + esc(this._alCierre(prev)) + '</th><th class="num">Al ' +
+      esc(this._alCierre(mes)) + '</th><th class="num">Movimiento</th></tr></thead><tbody>' +
+      fila('Estado de resultados · Ganancia (Pérdida) Neta del Ejercicio', a.er, b.er, id === "res" ? "total" : "") +
+      fila('Estado de situación financiera · Resultados Acumulados', a.ra, b.ra) +
+      fila('Balance · cuenta 59', a.c59, b.c59) +
+      fila('Ganancia que lleva el Estado de situación financiera', a.esf, b.esf, "cs-s");
+    if (id === "dif") h += fila('Diferencia entre los dos estados', a.dif, b.dif, "cs-extra");
+    return h + '</tbody></table></div>';
+  },
+  _detOri: function (emp, mes) {
+    var c = emp.cierres[mes], B = this._bal(c), self = this, t = '<button class="cerrar">Cerrar</button>';
+    var filas = ["56", "57"].map(function (k) {
+      var b = B[k];
+      return {cta: k, nom: b ? b.nombre : (k === "56" ? "RESULTADOS NO REALIZADOS" : "EXCEDENTE DE REVALUACIÓN"),
+              v: b ? (b["S.ACREEDOR"] || 0) - (b["S.DEUDOR"] || 0) : 0, lado: b ? "saldo" : "sin cuenta en el balance"};
+    });
+    return t + '<h3>Total Otro Resultado Integral · ' + esc(emp.nombre) + ' · al ' + esc(this._alCierre(mes)) +
+      '</h3>' + this._tablaCtas(emp, mes, filas, "cs-ori~o_tot", [["Total Otro Resultado Integral", self._valORI(c).v.o_tot, "total"]]);
+  },
+
+  _mayor: function (emp, c, mes) {
+    var b = c.balance;
+    var h = '<div class="d-carta"><h3 class="d-tit">Saldos por cuenta · ' + esc(emp.nombre) +
+      ' · acumulado a ' + esc(this._mesTxt(mes)) +
+      (b.nativo ? '' : '<span class="ob-sub"> · sumado desde las subcuentas</span>') +
+      '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Cuenta</th><th>Nombre</th><th class="num">Débito</th><th class="num">Crédito</th>' +
+      '<th class="num">Saldo deudor</th><th class="num">Saldo acreedor</th></tr></thead><tbody>';
+    var ids = [];
+    (b.cuentas || []).forEach(function (x) {
+      var a = "cs-cta~" + x.cuenta;
+      ids.push(a);
+      h += '<tr class="abrible" data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button">' +
+        '<td class="gris">' + esc(x.cuenta) + '</td><td class="obra">' + esc(x.nombre) +
+        '</td><td class="num">' + soles(x.DEBITO) + '</td><td class="num">' + soles(x.CREDITO) +
+        '</td><td class="num">' + soles(x["S.DEUDOR"]) + '</td><td class="num">' +
+        soles(x["S.ACREEDOR"]) + '</td></tr>';
+    });
+    var tt = b.totales;
+    if (tt) {
+      h += '<tr class="total"><td></td><td class="obra">TOTALES</td><td class="num">' +
+        soles(tt.DEBITO) + '</td><td class="num">' + soles(tt.CREDITO) + '</td><td class="num">' +
+        soles(tt["S.DEUDOR"]) + '</td><td class="num">' + soles(tt["S.ACREEDOR"]) + '</td></tr>';
+    }
+    if (b.resultado) {
+      var r = b.resultado, v = 0;
+      ["PASIVO", "ACTIVO", "PER. NAT.", "GAN. NAT."].forEach(function (k) {
+        if (!v && r[k]) v = r[k];
+      });
+      h += '<tr class="total"><td></td><td class="obra">' + esc(r.rotulo) +
+        '</td><td></td><td></td><td></td><td class="num">' + soles(v) + '</td></tr>';
+    }
+    h += '</tbody></table></div></div>';
+    ids.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+    return h;
+  },
+  /* La ventana de una cuenta del libro mayor. */
+  _detCta: function (emp, mes, cta) {
+    var self = this, c = (emp.cierres || {})[mes], B = this._bal(c), b = B[cta];
+    if (!b) return null;
+    var h = '<button class="cerrar">Cerrar</button><h3>' + esc(cta) + ' · ' + esc(b.nombre) + ' · ' +
+      esc(emp.nombre) + ' · acumulado al ' + esc(this._alCierre(mes)) + '</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Columna del balance</th>' +
+      '<th class="num">Importe</th></tr></thead><tbody>';
+    [["DEBITO", "Débito"], ["CREDITO", "Crédito"], ["S.DEUDOR", "Saldo deudor"],
+     ["S.ACREEDOR", "Saldo acreedor"], ["PER. NAT.", "Pérdida por naturaleza"],
+     ["GAN. NAT.", "Ganancia por naturaleza"], ["PER. FUN.", "Pérdida por función"],
+     ["GAN. FUN.", "Ganancia por función"]].forEach(function (k) {
+      if (self._cero(b[k[0]])) return;
+      h += '<tr><td class="obra">' + k[1] + '</td><td class="num">' + soles(b[k[0]]) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    var en = [], ve = this._valESF(c), vr = this._valER(c);
+    var plant = this._ESF_A.concat(this._ESF_P);
+    Object.keys(this._CTA_ESF).forEach(function (id) {
+      self._CTA_ESF[id].forEach(function (r) {
+        if (r[0] !== cta) return;
+        var s = (r[1] === "D" ? b["S.DEUDOR"] : b["S.ACREEDOR"]) || 0;
+        if (self._cero(s) || !ve) return;
+        en.push(['Situación financiera', self._fila(plant, id)[2], ve.v[id]]);
+      });
+    });
+    Object.keys(this._CTA_ER).forEach(function (id) {
+      if (self._CTA_ER[id].indexOf(cta) < 0 || self._cero(self._funcion(b)) || !vr) return;
+      en.push(['Resultados', self._fila(self._ER_F, id)[2], vr.v[id]]);
+    });
+    if (en.length) {
+      h += '<h4 class="cs-h4">En los estados · al ' + esc(this._alCierre(mes)) + '</h4>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Estado</th><th>Línea</th>' +
+        '<th class="num">Importe de la línea</th></tr></thead><tbody>' +
+        en.map(function (x) {
+          return '<tr><td class="gris">' + esc(x[0]) + '</td><td class="obra">' + esc(x[1]) +
+            '</td><td class="num">' + self._nf(x[2]) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    return h + this._panelCuenta(emp, mes, cta, "cs-cta~" + cta);
+  },
+
+  _exactaInd: function (x) {
+    var self = this;
+    return Object.keys(x.insumos || {}).filter(function (k) {
+      return k.indexOf(" · ") < 0; }).map(function (k) {
+      return (self._CORTO[k] || k) + ' ' + solesM(x.insumos[k]);
+    }).join(' · ');
+  },
+  _conCaja: function (E, mes) {
+    return this._EMPS.filter(function (e) { return ((E[e[0]] || {}).caja || {})[mes]; });
+  },
+  _caja: function (emp, mes, E) {
+    var self = this, mc = emp.caja[mes], I = mc.indicadores || {};
+    var h = '';
+    var vis = this._IND.slice();
+    var conValor = vis.filter(function (r) { return self._hayValor(I[r[0]]); });
+    if (conValor.length) {
+      h += '<div class="d-kpis">';
+      conValor.forEach(function (r) {
+        var x = I[r[0]];
+        h += self._tarjeta("cs-i-" + r[0], r[3], r[1], self._fmtCorto(x.valor, r[2]),
+          esc(self._exactaInd(x)),
+          esc(emp.nombre) + ' · ' + esc(self._mesTxt(mes)) + ' · libro caja ' + esc(mc.fuente),
+          x.valor < 0, false);
+      });
+      h += '</div>';
+      conValor.forEach(function (r) { h += '<div class="detalle" id="det-cs-i-' + r[0] + '"></div>'; });
+    }
+
+    var cols = this._conCaja(E, mes);
+    h += '<div class="d-carta"><h3 class="d-tit">Indicadores de caja por empresa · ' +
+      esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Indicador</th>' + cols.map(function (e) {
+        return '<th class="num">' + esc(e[1]) + '</th>'; }).join('') + '</tr></thead><tbody>';
+    vis.forEach(function (r) {
+      h += '<tr><td class="obra">' + esc(r[1]) + '</td>' + cols.map(function (e) {
+        var x = (E[e[0]].caja[mes].indicadores || {})[r[0]];
+        return '<td class="num' + (e[0] === self._emp ? ' cs-sel' : '') + '">' +
+          self._fmt(x ? x.valor : null, r[2]) + '</td>';
+      }).join('') + '</tr>';
+    });
+    h += '</tbody></table></div></div>';
+
+    var conVs = cols.some(function (e) {
+      var v = E[e[0]].caja[mes].vs_anterior;
+      return v !== undefined && v !== null;
+    });
+    var vsTxt = function (d) {
+      return d === undefined || d === null ? '—' : (d ? soles(d) +
+        '<span class="ob-sub"> · Contabilidad</span>' : 'igual');
+    };
+    h += '<div class="d-carta"><h3 class="d-tit">Libro caja por empresa · ' +
+      esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Empresa</th><th>Libro</th><th class="num">Saldo inicial</th><th class="num">Entradas</th>' +
+      '<th class="num">Salidas</th><th class="num">Saldo final</th>' +
+      (conVs ? '<th class="num">Inicial contra el cierre anterior</th>' : '') +
+      '</tr></thead><tbody>';
+    var t = {i: 0, d: 0, h: 0, f: 0}, idsE = [];
+    cols.forEach(function (e) {
+      var m = E[e[0]].caja[mes];
+      t.i += m.inicial; t.d += m.debe; t.h += m.haber; t.f += m.final;
+      /* cada empresa abre su libro caja por contrapartida, hasta el asiento */
+      var a = "cs-lce~" + e[0];
+      idsE.push(a);
+      h += '<tr class="abrible' + (e[0] === self._emp ? ' cs-sel' : '') + '" data-abre="' + a +
+        '" aria-expanded="false" tabindex="0" role="button"><td class="obra">' +
+        esc(e[1]) + '</td><td>' + esc(m.fuente) +
+        '</td><td class="num">' + soles(m.inicial) + '</td><td class="num">' + soles(m.debe) +
+        '</td><td class="num">' + soles(m.haber) + '</td><td class="num">' + soles(m.final) +
+        '</td>' + (conVs ? '<td class="num"' + (m.vs_anterior ? ' style="color:var(--rojo)"' : '') +
+          '>' + vsTxt(m.vs_anterior) + '</td>' : '') + '</tr>';
+    });
+    h += '<tr class="total"><td class="obra">TOTAL</td><td></td><td class="num">' + soles(t.i) +
+      '</td><td class="num">' + soles(t.d) + '</td><td class="num">' + soles(t.h) +
+      '</td><td class="num">' + soles(t.f) + '</td>' + (conVs ? '<td></td>' : '') +
+      '</tr></tbody></table></div></div>';
+    idsE.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+
+    var ks = Object.keys(emp.caja).sort().filter(function (k) { return k <= mes; });
+    if (ks.length > 1) {
+      h += '<div class="d-carta"><h3 class="d-tit">Libro caja por mes · ' + esc(emp.nombre) +
+        '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr><th>Mes</th>' +
+        '<th class="num">Saldo inicial</th><th class="num">Entradas</th><th class="num">Salidas</th>' +
+        '<th class="num">Saldo final</th><th class="num">Inicial contra el cierre anterior</th>' +
+        '</tr></thead><tbody>';
+      var idsM = [];
+      ks.forEach(function (k) {
+        var m = emp.caja[k], a = "cs-lcm~" + k;
+        idsM.push(a);
+        h += '<tr class="abrible' + (k === mes ? ' cs-sel' : '') + '" data-abre="' + a +
+          '" aria-expanded="false" tabindex="0" role="button"><td class="obra">' +
+          esc(self._mesTxt(k)) + '<span class="ob-sub"> · ' + esc(m.fuente) + '</span></td>' +
+          '<td class="num">' + soles(m.inicial) + '</td><td class="num">' + soles(m.debe) +
+          '</td><td class="num">' + soles(m.haber) + '</td><td class="num">' + soles(m.final) +
+          '</td><td class="num"' + (m.vs_anterior ? ' style="color:var(--rojo)"' : '') + '>' +
+          vsTxt(m.vs_anterior) + '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+      idsM.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+    }
+
+    /* las salidas de cada tipo de cuenta, en las empresas con libro caja */
+    var filas = {};
+    cols.forEach(function (e) {
+      (E[e[0]].caja[mes].tipos || []).forEach(function (x) {
+        var f = filas[x.cuenta] = filas[x.cuenta] || {nombre: x.nombre, v: {}};
+        f.v[e[0]] = x.haber;
+      });
+    });
+    var cods = Object.keys(filas).sort().filter(function (k) {
+      return cols.some(function (e) { return filas[k].v[e[0]]; });
+    });
+    if (cods.length) {
+      h += '<div class="d-carta"><h3 class="d-tit">Salidas por tipo de cuenta · ' +
+        esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cuenta</th><th>Plan contable</th>' + cols.map(function (e) {
+          return '<th class="num">' + esc(e[1]) + '</th>'; }).join('') +
+        '<th class="num">Total</th></tr></thead><tbody>';
+      var tot = {}, tt = 0, idsT = [];
+      cods.forEach(function (k) {
+        var suma = 0, a = "cs-lct~" + k;
+        idsT.push(a);
+        h += '<tr class="abrible" data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button">' +
+          '<td class="gris">' + esc(k) + '</td><td class="obra">' + esc(filas[k].nombre) +
+          '</td>' + cols.map(function (e) {
+            var v = filas[k].v[e[0]] || 0;
+            suma += v; tot[e[0]] = (tot[e[0]] || 0) + v;
+            return '<td class="num' + (e[0] === self._emp ? ' cs-sel' : '') + '">' + soles(v) + '</td>';
+          }).join('') + '<td class="num">' + soles(suma) + '</td></tr>';
+        tt += suma;
+      });
+      h += '<tr class="total"><td></td><td class="obra">TOTAL</td>' +
+        cols.map(function (e) { return '<td class="num">' + soles(tot[e[0]] || 0) + '</td>'; }).join('') +
+        '<td class="num">' + soles(tt) + '</td></tr></tbody></table></div></div>';
+      idsT.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+    }
+    return h;
+  },
+  _detTipoSalidas: function (E, mes, k) {
+    var self = this, h = '<button class="cerrar">Cerrar</button><h3>Salidas por la cuenta ' + esc(k) +
+      ' · ' + esc(this._mesTxt(mes)) + '</h3>';
+    this._conCaja(E, mes).forEach(function (e) {
+      var cj = E[e[0]].caja[mes];
+      var subs = self._subsDe(cj, k).filter(function (x) { return !self._cero(x.haber); });
+      if (!subs.length) return;
+      h += self._tablaSubs(e[1], subs, "cs-lct~" + k + "~" + e[0], cj);
+    });
+    return h;
+  },
+
+  _movs: function (emp, mes) {
+    var self = this, m = emp.caja[mes];
+    var sufijo = esc(emp.nombre) + ' · ' + esc(this._mesTxt(mes));
+    var h = '';
+    if ((m.tipos || []).length) {
+      h += '<div class="d-carta"><h3 class="d-tit">Por tipo de cuenta · ' + sufijo + '</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Cuenta</th>' +
+        '<th>Plan contable</th><th class="num">Entradas</th><th class="num">Salidas</th>' +
+        '<th class="num">Movimientos</th></tr></thead><tbody>';
+      var nt = 0, idsT = [];
+      m.tipos.forEach(function (x) {
+        nt += x.filas || 0;
+        var a = "cs-mt~" + x.cuenta;
+        idsT.push(a);
+        h += '<tr class="abrible" data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button">' +
+          '<td class="gris">' + esc(x.cuenta) + '</td><td class="obra">' + esc(x.nombre) +
+          '</td><td class="num">' + soles(x.debe) + '</td><td class="num">' + soles(x.haber) +
+          '</td><td class="num">' + ent(x.filas) + '</td></tr>';
+      });
+      h += '<tr class="total"><td></td><td class="obra">TOTAL</td><td class="num">' +
+        soles(m.debe) + '</td><td class="num">' + soles(m.haber) + '</td><td class="num">' +
+        ent(nt) + '</td></tr></tbody></table></div></div>';
+      idsT.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+    }
+
+    h += '<div class="d-carta"><h3 class="d-tit">Mayor de caja · ' + sufijo + '</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Cuenta</th>' +
+      '<th>Descripción</th><th class="num">Entradas</th><th class="num">Salidas</th>' +
+      '<th class="num">Neto</th><th class="num">Movimientos</th></tr></thead><tbody>';
+    var n = 0, idsC = [], conDiario = (m.diario || []).length > 0;
+    (m.cuentas || []).forEach(function (c) {
+      var neto = c.debe - c.haber;
+      n += c.filas || 0;
+      /* la subcuenta abre sus asientos, cuando el libro es analítico */
+      var a = conDiario ? "cs-mc~" + c.cuenta : null;
+      if (a) idsC.push(a);
+      h += '<tr' + (a ? ' class="abrible" data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button"' : '') +
+        '><td class="gris">' + esc(c.cuenta) + '</td><td class="obra">' +
+        esc(c.descripcion) + '</td><td class="num">' + soles(c.debe) + '</td><td class="num">' +
+        soles(c.haber) + '</td><td class="num"' + (neto < 0 ? ' style="color:var(--rojo)"' : '') +
+        '>' + soles(neto) + '</td><td class="num">' + ent(c.filas) + '</td></tr>';
+    });
+    h += '<tr class="total"><td></td><td class="obra">TOTAL</td><td class="num">' +
+      soles(m.debe) + '</td><td class="num">' + soles(m.haber) + '</td><td class="num">' +
+      soles(m.debe - m.haber) + '</td><td class="num">' + ent(n) +
+      '</td></tr></tbody></table></div></div>';
+    idsC.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+
+    if (!(m.diario || []).length) return h;
+    var cols = (this._D.contasis_mensual || {}).diario_cols || [];
+    var ix = {};
+    cols.forEach(function (c, i) { ix[c] = i; });
+    var nom = {};
+    (m.cuentas || []).forEach(function (c) { nom[c.cuenta] = c.descripcion; });
+    h += '<div class="d-carta"><h3 class="d-tit">Diario de caja · ' + sufijo + ' · ' +
+      ent(m.diario.length) + ' movimientos</h3><div class="envoltura-tabla"><table class="datos">' +
+      '<thead><tr><th>Fecha · asiento</th><th>Cuenta</th><th>Empresa · comprobante</th>' +
+      '<th class="num">Entradas</th><th class="num">Salidas</th></tr></thead><tbody>';
+    var td = 0, th = 0;
+    m.diario.forEach(function (f) {
+      var d = f[ix.debe] || 0, hb = f[ix.haber] || 0;
+      td += d; th += hb;
+      var emp2 = f[ix.empresa] ? esc(f[ix.empresa]) +
+        (f[ix.numero] ? '<span class="ob-sub"> · ' + esc(f[ix.numero]) + '</span>' : '') : '';
+      h += '<tr><td class="gris">' + esc(f[ix.fecha]) + '<span class="ob-sub"> · ' +
+        esc(f[ix.sd] + '-' + f[ix.asiento]) + ' · doc. ' + esc(f[ix.doc]) + '</span></td>' +
+        '<td class="obra">' + esc(f[ix.cuenta]) + ' · ' + esc(nom[f[ix.cuenta]] || '') +
+        '</td><td class="obra">' + emp2 + '</td><td class="num">' + (d ? soles(d) : '') +
+        '</td><td class="num">' + (hb ? soles(hb) : '') + '</td></tr>';
+    });
+    return h + '<tr class="total"><td colspan="3" class="obra">TOTAL</td><td class="num">' +
+      soles(td) + '</td><td class="num">' + soles(th) + '</td></tr></tbody></table></div></div>';
+  },
+
+  _registros: function (emp, mes) {
+    var self = this, anio = mes.slice(0, 4);
+    var t0 = function (rg, ks) {
+      return ks.reduce(function (a, k) { return a + (rg.meses[k].n || 0); }, 0);
+    };
+    var tabla = function (titulo, rg, tipo) {
+      if (!rg || rg.periodo !== mes) return '';
+      var ks = Object.keys(rg.meses || {}).sort().filter(function (k) {
+        return k.slice(0, 4) === anio && k <= mes; });
+      if (!ks.length) return '';
+      var otrosTit = (rg.otros_cols || []).length ?
+        rg.otros_cols.map(function (c) {
+          return c.charAt(0) + c.slice(1).toLowerCase(); }).join(' + ') : 'Otros';
+      var conResto = ks.some(function (k) {
+        return Math.abs(rg.meses[k].sin_desglose || 0) >= 0.005; });
+      var rango = ks.length === 1 ? self._mesTxt(ks[0])
+        : self._mesTxt(ks[0]) + ' a ' + self._mesTxt(ks[ks.length - 1]);
+      var h = '<div class="d-carta"><h3 class="d-tit">' + titulo +
+        '<span class="ob-sub"> · ' + esc(rango) + ' · ' + ent(t0(rg, ks)) +
+        ' comprobantes</span></h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Mes</th>' +
+        '<th class="num">Comprobantes</th><th class="num">Base imponible</th>' +
+        '<th class="num">IGV</th><th class="num">' + esc(otrosTit) + '</th>' +
+        (conResto ? '<th class="num">Total sin desglose</th>' : '') +
+        '<th class="num">Total</th></tr></thead><tbody>';
+      var t = {n: 0, base: 0, igv: 0, otros: 0, sin_desglose: 0, total: 0};
+      var celdaResto = function (v) {
+        return conResto ? '<td class="num"' + (Math.abs(v) >= 0.005 ? ' style="color:var(--rojo)"' : '') +
+          '>' + soles(v) + (Math.abs(v) >= 0.005 ? '<span class="ob-sub"> · Contabilidad</span>' : '') +
+          '</td>' : '';
+      };
+      var ids = [];
+      ks.forEach(function (k) {
+        var m = rg.meses[k];
+        Object.keys(t).forEach(function (x) { t[x] += m[x] || 0; });
+        var a = (rg.filas || []).some(function (f) { return String(f[0]).slice(0, 7) === k; }) ?
+          "cs-reg~" + tipo + "~" + k : null;
+        if (a) ids.push(a);
+        h += '<tr' + (a ? ' class="abrible" data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button"' : '') +
+          '><td class="obra">' + esc(self._mesTxt(k)) + '</td><td class="num">' +
+          ent(m.n) + '</td><td class="num">' + soles(m.base) + '</td><td class="num">' +
+          soles(m.igv) + '</td><td class="num">' + soles(m.otros || 0) + '</td>' +
+          celdaResto(m.sin_desglose || 0) + '<td class="num">' + soles(m.total) + '</td></tr>';
+      });
+      h += '<tr class="total"><td class="obra">TOTAL</td><td class="num">' + ent(t.n) +
+        '</td><td class="num">' + soles(t.base) + '</td><td class="num">' + soles(t.igv) +
+        '</td><td class="num">' + soles(t.otros) + '</td>' + celdaResto(t.sin_desglose) +
+        '<td class="num">' + soles(t.total) + '</td></tr></tbody></table></div></div>';
+      ids.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+      return h;
+    };
+    var R = emp.registros || {};
+    var suf = esc(emp.nombre);
+    var h = '<div class="d-dos">' +
+      tabla('Registro de ventas · ' + suf, R.ventas, "ventas") +
+      tabla('Registro de compras · ' + suf, R.compras, "compras") + '</div>';
+    var pv = R.compras && R.compras.periodo === mes ? (R.compras.proveedores || []) : [];
+    if (!pv.length) return h;
+    h += '<div class="d-carta"><h3 class="d-tit">Proveedores con más compras · ' + suf +
+      '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr><th>Proveedor</th>' +
+      '<th class="num">Comprobantes</th><th class="num">Total</th></tr></thead><tbody>';
+    /* el proveedor abre sus comprobantes del registro */
+    var idsP = [], conFilas = (R.compras.filas || []).length > 0;
+    pv.forEach(function (p, i) {
+      var a = conFilas ? "cs-prov~" + i : null;
+      if (a) idsP.push(a);
+      h += '<tr' + (a ? ' class="abrible" data-abre="' + a + '" aria-expanded="false" tabindex="0" role="button"' : '') +
+        '><td class="obra">' + esc(p.proveedor) + '</td><td class="num">' + ent(p.n) +
+        '</td><td class="num">' + soles(p.total) + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+    idsP.forEach(function (a) { h += '<div class="detalle" id="det-' + a + '"></div>'; });
+    return h;
+  },
+
+  detalle: function (id) {
+    var t = '<button class="cerrar">Cerrar</button>';
+    var E = this._E(), emp = E[this._emp], mes = this._mes();
+    if (!emp || !mes) return null;
+    var p = String(id).split("~");
+    if (p.length >= 3 && (p[p.length - 2] === "s" || p[p.length - 2] === "t")) {
+      var ce = emp, cm = mes;
+      if (p[0] === "cs-lce") ce = E[p[1]];
+      if (p[0] === "cs-lcm") cm = p[1];
+      if (p[0] === "cs-lct") ce = E[p[2]];
+      var cj = ce && (ce.caja || {})[cm];
+      if (!cj) return null;
+      var k = p[p.length - 1], marca = p[p.length - 2];
+      var nom = marca === "s" ? (this._NOMDIARIO(cj)[k] || '') :
+        (((cj.tipos || []).filter(function (x) { return x.cuenta === k; })[0] || {}).nombre || '');
+      return t + this._tablaAsientos((marca === "s" ? 'Subcuenta ' : 'Cuenta ') + k + ' · ' + nom +
+        ' · ' + ce.nombre + ' · ' + this._mesTxt(cm), cj, function (r, ix) {
+          return marca === "s" ? r[ix.cuenta] === k : String(r[ix.cuenta] || "").slice(0, 2) === k;
+        });
+    }
+    if (p[0] === "cs-esf") return this._detEsf(emp, mes, p[1], p);
+    if (p[0] === "cs-er") return this._detEr(emp, mes, p[1], p);
+    if (p[0] === "cs-efe") return this._detEfe(emp, mes, p[1], p);
+    if (p[0] === "cs-epn") return this._detEpn(emp, mes, p[1]);
+    if (p[0] === "cs-ori") {
+      if (p.length > 2) { var po = this._panelCuenta(emp, mes, p[2], p.join("~")); return po ? t + po : null; }
+      return this._detOri(emp, mes);
+    }
+    if (p[0] === "cs-cta") {
+      if (p.length > 2) { var pq = this._panelCuenta(emp, mes, p[2], p.join("~")); return pq ? t + pq : null; }
+      return this._detCta(emp, mes, p[1]);
+    }
+    if (p[0] === "cs-mt") {
+      var cjm = (emp.caja || {})[mes];
+      var tp = ((cjm && cjm.tipos) || []).filter(function (x) { return x.cuenta === p[1]; })[0];
+      if (!tp) return null;
+      return t + '<h3>' + esc(p[1]) + ' · ' + esc(tp.nombre) + ' · ' + esc(emp.nombre) + ' · ' +
+        esc(this._mesTxt(mes)) + '</h3>' +
+        this._tablaSubs('Subcuentas', this._subsDe(cjm, p[1]), "cs-mt~" + p[1], cjm);
+    }
+    if (p[0] === "cs-mc") {
+      var cjc = (emp.caja || {})[mes];
+      if (!cjc) return null;
+      var nm = this._NOMDIARIO(cjc)[p[1]] || '';
+      return t + '<h3>' + esc(p[1]) + ' · ' + esc(nm) + ' · ' + esc(emp.nombre) + ' · ' +
+        esc(this._mesTxt(mes)) + '</h3>' + this._tablaAsientos('Asientos', cjc, function (r, ix) {
+          return r[ix.cuenta] === p[1]; });
+    }
+    if (p[0] === "cs-lce" || p[0] === "cs-lcm") {
+      var e2 = p[0] === "cs-lce" ? E[p[1]] : emp, m2 = p[0] === "cs-lcm" ? p[1] : mes;
+      var cj2 = e2 && (e2.caja || {})[m2];
+      if (!cj2) return null;
+      return t + '<h3>Libro caja · ' + esc(e2.nombre) + ' · ' + esc(this._mesTxt(m2)) + '</h3>' +
+        this._tablaTipos('Por contrapartida', cj2, p.join("~"));
+    }
+    if (p[0] === "cs-lct") return this._detTipoSalidas(E, mes, p[1]);
+    if (p[0] === "cs-reg") {
+      var rg = (emp.registros || {})[p[1]];
+      if (!rg) return null;
+      return t + '<h3>' + (p[1] === "compras" ? 'Registro de compras' : 'Registro de ventas') + ' · ' +
+        esc(emp.nombre) + ' · ' + esc(this._mesTxt(p[2])) + '</h3>' +
+        this._tablaComprobantes('Comprobantes', rg, p[2]);
+    }
+    if (p[0] === "cs-prov") {
+      var rc = (emp.registros || {}).compras, pv = rc && (rc.proveedores || [])[Number(p[1])];
+      if (!pv) return null;
+      var quien = pv.proveedor === "Personas naturales" ? "Persona natural" : pv.proveedor;
+      var sub = {filas_cols: rc.filas_cols, filas: (rc.filas || []).filter(function (f) { return f[3] === quien; })};
+      var meses = {};
+      sub.filas.forEach(function (f) { meses[String(f[0]).slice(0, 7)] = 1; });
+      var self2 = this;
+      return t + '<h3>' + esc(pv.proveedor) + ' · ' + esc(emp.nombre) + ' · registro de compras</h3>' +
+        Object.keys(meses).sort().map(function (k) {
+          return self2._tablaComprobantes(self2._mesTxt(k), sub, k);
+        }).join('');
+    }
+    var mi = /^cs-i-(.+)$/.exec(id);
+    if (mi) {
+      var mc = (emp.caja || {})[mes];
+      var xi = mc && mc.indicadores ? mc.indicadores[mi[1]] : null;
+      if (!this._hayValor(xi)) return null;
+      var di = this._IND.filter(function (x) { return x[0] === mi[1]; })[0] || [mi[1], mi[1], "x"];
+      var hi = t + '<h3>' + esc(di[1]) + ' · de dónde sale · ' + esc(emp.nombre) +
+        ' · ' + esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos">' +
+        '<thead><tr><th>Partida del libro caja</th><th class="num">Monto</th></tr></thead><tbody>';
+      Object.keys(xi.insumos || {}).forEach(function (k) {
+        hi += '<tr><td class="obra">' + esc(k) + '</td><td class="num">' +
+          soles(xi.insumos[k]) + '</td></tr>';
+      });
+      return hi + '<tr class="total"><td class="obra">' + esc(di[1]) + '</td><td class="num">' +
+        this._fmt(xi.valor, di[2]) + '</td></tr></tbody></table></div>';
+    }
+    var m = /^cs-r-(.+)$/.exec(id);
+    if (m) {
+      var c = (emp.cierres || {})[mes];
+      var r = c && c.ratios ? c.ratios[m[1]] : null;
+      if (!this._hayValor(r)) return null;
+      var def = this._RAT.filter(function (x) { return x[0] === m[1]; })[0] || [m[1], m[1], "x"];
+      var h = t + '<h3>' + esc(def[1]) + ' · de dónde sale · ' + esc(emp.nombre) + ' · ' +
+        esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Partida</th><th class="num">Monto</th></tr></thead><tbody>';
+      Object.keys(r.insumos || {}).forEach(function (k) {
+        var v = r.insumos[k];
+        h += '<tr><td class="obra">' + esc(k) + '</td><td class="num">' +
+          (v === null || v === undefined ? 'vacío en el archivo' : soles(v)) + '</td></tr>';
+      });
+      return h + '<tr class="total"><td class="obra">' + esc(def[1]) + ' · ' + esc(r.formula || '') +
+        '</td><td class="num">' + this._fmt(r.valor, def[2]) + '</td></tr></tbody></table></div>';
+    }
+    return null;
+  },
+
+  conectar: function () {
+    var self = this;
+    var caja = document.getElementById("cs-caja");
+    if (!caja) return;
+    caja.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-cs-tab]") : null;
+      if (!b || b.disabled) return;
+      self._tab = b.getAttribute("data-cs-tab");
+      caja.innerHTML = self._cuerpo();
+      if (typeof conectarAbribles === "function") conectarAbribles(caja);
+    });
+    caja.addEventListener("change", function (e) {
+      var s = e.target;
+      if (!s || !s.id) return;
+      if (s.id === "cs-mes") self._mesSel = s.value;
+      else if (s.id === "cs-emp") self._emp = s.value;
+      else return;
+      caja.innerHTML = self._cuerpo();
+      if (typeof conectarAbribles === "function") conectarAbribles(caja);
+    });
+  }
+};
+</script>
+</body>
+</html>

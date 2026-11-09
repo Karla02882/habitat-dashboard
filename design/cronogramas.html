@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Cronogramas</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "cronogramas",
+  nombre: "Cronogramas",
+  titulo: "Cronogramas de obra",
+  pregunta: "¿Qué está en curso, qué venció y qué falta programar?",
+  /* NO es AXION: sale del Project que sube Obra, convertido a Excel. */
+  fuentes: ["CRONOGRAMAS"],
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+
+  _obra: 0,
+  _vista: "partidas",   /* partidas · gantt · curva */
+  _grano: "fase",       /* dentro del Gantt: fase · partida */
+  _abierto: "",
+  _busca: "",
+  _filtro: "",
+
+  pintar: function (M, D) {
+    var C = (D || {}).cronogramas || {};
+    if (!C.hay) {
+      return '<div class="d-lienzo"><div class="tarjeta">' +
+        '<span class="overline">Cronogramas</span>' +
+        '<p class="mas">' + esc(C.motivo || "sin cronogramas publicados") +
+        ' · Obra</p></div></div>';
+    }
+    var self = this;
+    var obras = C.obras || [];
+    if (this._obra >= obras.length) this._obra = 0;
+    var O = obras[this._obra];
+    var bus = (this._busca || "").toUpperCase();
+    var filtro = this._filtro;
+
+    var pasa = function (p) {
+      if (filtro && p.estado !== filtro) return false;
+      if (!bus) return true;
+      return (p.nombre + " " + p.wbs).toUpperCase().indexOf(bus) >= 0;
+    };
+
+    /* Los contadores salen de lo que se ve, no del total de la obra. */
+    var vistas = [];
+    (O.caps || []).forEach(function (c) {
+      (c.partidas || []).forEach(function (p) { if (pasa(p)) vistas.push(p); });
+    });
+    var cuenta = function (e) {
+      return vistas.filter(function (p) { return p.estado === e; }).length;
+    };
+
+    var h = '<div class="d-lienzo">';
+
+    h += '<div class="rejilla-4">' +
+      _cr_tarjeta("En curso hoy", cuenta("En curso"), "al " + esc(C.corte)) +
+      _cr_tarjeta("Vencidas", cuenta("Vencida"), "su fin ya pasó · avance sin cargar") +
+      _cr_tarjeta("Arrancan en 30 días", cuenta("Por arrancar"), "hasta el " + esc(C.en30)) +
+      _cr_tarjeta("Sin programar", cuenta("Sin programar"), "sin fecha propia ni predecesora · Obra") +
+      '</div>';
+
+    h += '<div class="st-barra">' +
+      '<div class="bi-tot"><b>' + ent(vistas.length) + '</b> ' +
+      (vistas.length === 1 ? "partida" : "partidas") +
+      '<span class="st-sep">· ' + esc(O.obra) + ' · ' + ent(O.capn) + ' capítulos · ' +
+      esc(O.rango) + '</span></div>' +
+      '<label class="st-campo">Buscar<input id="cg-busca" type="search" ' +
+      'placeholder="partida, WBS…" value="' + esc(this._busca || "") + '"></label>' +
+      '<div class="st-tipos">' +
+        ["", "En curso", "Vencida", "Por arrancar", "Sin programar"].map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (filtro === x ? ' st-pill-on' : '') + '" data-f="' + esc(x) + '">' +
+            (x || "Todas") + '</button>';
+        }).join("") +
+      '</div></div>';
+
+    /* Los botones de obra solo tienen sentido con más de una. */
+    if (obras.length > 1) {
+      h += '<div class="st-tipos" style="margin:0 0 var(--e3)">' +
+        obras.map(function (o, i) {
+          return '<button type="button" class="st-pill' +
+            (self._obra === i ? ' st-pill-on' : '') + '" data-o="' + i + '">' +
+            esc(o.obra) + '</button>';
+        }).join("") + '</div>';
+    }
+
+    var VAL = _cg_val(D, O.obra);
+    h += '<div class="pills-emp" style="margin:0 0 var(--e3)">' +
+      '<button class="pill-emp pill-cg' + (this._vista === "partidas" ? ' activa' : '') +
+      '" data-v="partidas" type="button">Partidas</button>' +
+      '<button class="pill-emp pill-cg' + (this._vista === "gantt" ? ' activa' : '') +
+      '" data-v="gantt" type="button">Gantt</button>' +
+      (VAL ? '<button class="pill-emp pill-cg' + (this._vista === "curva" ? ' activa' : '') +
+             '" data-v="curva" type="button">Curva S</button>' : '') +
+      '</div>';
+    if (this._vista === "curva" && !VAL) this._vista = "partidas";
+
+    if (this._vista === "gantt") {
+      return h + _cg_gantt(O, vistas, C, this._grano) + '</div>';
+    }
+    if (this._vista === "curva") {
+      return h + _cg_curva(VAL, O) + '</div>';
+    }
+
+    h += '<div class="st-grid">';
+    var conAlgo = 0, COL = _cr_colores(O);
+    (O.caps || []).forEach(function (c, i) {
+      var ps = (c.partidas || []).filter(pasa);
+      if (!ps.length) return;
+      conAlgo++;
+      var esta = (self._abierto === "k" + i);
+      var m = "";
+      ["En curso", "Vencida", "Por arrancar", "Sin programar"].forEach(function (e) {
+        var n = ps.filter(function (p) { return p.estado === e; }).length;
+        if (n) m += '<span class="cg-est ' + _cr_clase(e) + '">' + ent(n) + ' ' +
+          (e === "En curso" ? "en curso" : e === "Vencida" ? "vencidas"
+           : e === "Por arrancar" ? "por arrancar" : "sin programar") + '</span>';
+      });
+      h += '<div class="st-tarj' + (esta ? ' st-on' : '') + '" data-k="k' + i + '" ' +
+        (c.esp ? 'style="border-top:4px solid ' + COL[c.esp] + '" ' : '') +
+        'tabindex="0" role="button" aria-expanded="' + (esta ? 'true' : 'false') + '">' +
+        (c.esp ? '<div class="cg-esp">' + _cr_sec(c, COL) + '</div>' : '') +
+        '<div class="st-nom">' + esc(c.nombre) +
+          '<span class="st-tipo">' + esc(c.wbs) + '</span></div>' +
+        '<div class="st-libres"><b>' + ent(ps.length) + '</b> ' +
+        (ps.length === 1 ? "partida" : "partidas") + '</div>' +
+        '<div class="st-rango">' + (c.desde ? esc(c.desde) + ' → ' + esc(c.hasta)
+                                            : "sin fechas programadas") + '</div>' +
+        '<div class="cg-mini">' + m + '</div>' +
+        '<div class="st-ver">' + (esta ? 'Cerrar' : 'Ver las partidas') + '</div>' +
+        '</div>';
+    });
+    h += '</div>';
+
+    (O.caps || []).forEach(function (c, i) {
+      if (self._abierto !== "k" + i) return;
+      var ps = (c.partidas || []).filter(pasa);
+      h += '<div class="tarjeta st-lista">' +
+        '<button type="button" class="st-cerrar" aria-label="Cerrar">✕</button>' +
+        '<span class="overline"><span class="cg-ovl">' + _cr_sec(c, COL) +
+        esc(c.wbs ? c.wbs + ' ' : '') + esc(c.nombre) + '</span>' +
+        '<span class="st-cuenta">' + ent(ps.length) + ' ' +
+        (ps.length === 1 ? "partida" : "partidas") + '</span></span>' +
+        '<div class="envoltura-tabla"><table class="datos cg-tabla"><thead><tr>' +
+        '<th>WBS</th><th>Partida</th><th>Inicio</th><th>Fin</th>' +
+        '<th class="num">Días</th><th>Estado</th><th>Restricción</th>' +
+        '</tr></thead><tbody>';
+      ps.forEach(function (p) {
+        var sinf = (p.estado === "Sin programar");
+        h += '<tr><td>' + esc(p.wbs) + '</td>' +
+          '<td class="obra">' + esc(p.nombre) + '</td>' +
+          '<td>' + (sinf ? '—' : esc(p.ini)) + '</td>' +
+          '<td>' + (sinf ? '—' : esc(p.fin)) + '</td>' +
+          '<td class="num">' + (p.dias === null ? '—' : ent(p.dias)) + '</td>' +
+          '<td><span class="cg-est ' + _cr_clase(p.estado) + '">' + esc(p.estado) + '</span></td>' +
+          '<td>' + esc(p.rest ? (p.restf ? p.rest + ' ' + p.restf : p.rest) : '—') + '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+    });
+
+    if (!conAlgo) {
+      h += '<div class="tarjeta"><p class="mas">Ninguna partida con ese filtro</p></div>';
+    }
+    if ((C.fallidos || []).length) {
+      h += '<p class="mas">Cronogramas que no se pudieron leer · ' +
+        esc(C.fallidos.join(" · ")) + ' · Obra</p>';
+    }
+    return h + '</div>';
+  },
+
+  conectar: function () {
+    var self = this;
+    document.querySelectorAll("#hoja .pill-cg").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._vista = el.getAttribute("data-v") || "partidas";
+        self._abierto = "";
+        pintar();
+      });
+    });
+    document.querySelectorAll("#hoja .cg-grano [data-g]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._grano = el.getAttribute("data-g") || "fase";
+        pintar();
+      });
+    });
+    _cg_ralear();
+    if (!window.__cgRalear) {
+      window.__cgRalear = true;
+      var tm = null;
+      window.addEventListener("resize", function () {
+        clearTimeout(tm); tm = setTimeout(_cg_ralear, 150);
+      });
+    }
+    document.querySelectorAll("#hoja .st-tarj").forEach(function (el) {
+      var abrir = function () {
+        var id = el.getAttribute("data-k");
+        self._abierto = (self._abierto === id) ? "" : id;
+        pintar();
+        if (self._abierto) setTimeout(function () {
+          var l = document.querySelector("#hoja .st-lista");
+          if (l) l.scrollIntoView({behavior: "smooth", block: "start"});
+        }, 60);
+      };
+      el.addEventListener("click", abrir);
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); }
+      });
+    });
+    document.querySelectorAll("#hoja .st-cerrar").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.stopPropagation(); self._abierto = ""; pintar();
+      });
+    });
+    document.querySelectorAll("#hoja [data-f]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._filtro = el.getAttribute("data-f") || ""; self._abierto = ""; pintar();
+      });
+    });
+    document.querySelectorAll("#hoja [data-o]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._obra = +el.getAttribute("data-o"); self._abierto = ""; pintar();
+      });
+    });
+    var b = document.getElementById("cg-busca");
+    if (b) {
+      b.addEventListener("input", function () {
+        self._busca = b.value;
+        var pos = b.selectionStart;
+        pintar();
+        var n = document.getElementById("cg-busca");
+        if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+  }
+};
+
+function _cr_tarjeta(rot, n, sub) {
+  return '<div class="tarjeta"><span class="overline">' + esc(rot) + '</span>' +
+    '<div class="cifra-g">' + ent(n) + '</div>' +
+    '<p class="mas">' + esc(sub) + '</p></div>';
+}
+function _cr_esp(c) {
+  if (!c.esp) return "";
+  var n = String(c.wbs || "").split(".")[0];
+  return (n ? n + " " : "") + c.esp;
+}
+
+var _CR_SEC = [
+  [/ESTRUCTUR/, "#016AB4"],
+  [/ARQUITECT/, "#C2560A"],
+  [/ELECTRIC/, "#1B7E46"],
+  [/SANITAR/, "#5F3AA3"],
+  [/MOBILIAR/, "#017B8E"],
+  [/PROVI[CS]ION|PRELIMINAR/, "#56606E"]
+];
+var _CR_LIBRES = ["#A3324F", "#8A6A12", "#2F5D7C", "#6B4E2E"];
+
+function _cr_colores(O) {
+  var col = {}, usados = [];
+  (O.caps || []).forEach(function (c) {
+    if (!c.esp || col[c.esp]) return;
+    var k = String(c.esp).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    var m = _CR_SEC.filter(function (s) {
+      return s[0].test(k) && usados.indexOf(s[1]) < 0;
+    })[0];
+    var h = m ? m[1] : (_CR_LIBRES.filter(function (x) {
+      return usados.indexOf(x) < 0;
+    })[0] || _CR_LIBRES[0]);
+    col[c.esp] = h;
+    usados.push(h);
+  });
+  return col;
+}
+
+function _cr_sec(c, col) {
+  if (!c.esp) return "";
+  return '<span class="cg-sec" style="background:' + col[c.esp] + '">' +
+    esc(_cr_esp(c)) + '</span> ';
+}
+
+function _cg_ralear() {
+  var regla = document.querySelector("#hoja .cg-regla");
+  if (!regla) return;
+  var ms = [].slice.call(regla.querySelectorAll(".cg-marca"));
+  ms.forEach(function (m) { m.style.visibility = ""; });
+  var cajas = ms.map(function (m) {
+    var b = m.getBoundingClientRect();
+    return {m: +m.getAttribute("data-m"), l: b.left, r: b.right};
+  });
+  var saltos = [1, 2, 3, 6, 12], k = 12;
+  for (var i = 0; i < saltos.length; i++) {
+    var ult = null, choca = false;
+    cajas.forEach(function (c) {
+      if (c.m % saltos[i]) return;
+      if (ult && c.l < ult.r + 4) choca = true;
+      ult = c;
+    });
+    if (!choca) { k = saltos[i]; break; }
+  }
+  ms.forEach(function (m, j) {
+    if (cajas[j].m % k) m.style.visibility = "hidden";
+  });
+}
+
+function _cr_clase(e) {
+  return e === "En curso" ? "cg-curso" : e === "Vencida" ? "cg-venc"
+       : e === "Por arrancar" ? "cg-porv" : "cg-sinp";
+}
+function _cg_val(D, obra) {
+  var V = (D || {}).valorizaciones || {};
+  if (!V.hay) return null;
+  var palabras = String(obra || "").toUpperCase().split(/[^A-ZÁÉÍÓÚÑ0-9]+/)
+    .filter(function (w) { return w.length > 3; });
+  if (!palabras.length) return null;
+  var hallados = (V.obras || []).filter(function (o) {
+    var suyas = String(o.obra || "").toUpperCase().split(/[^A-ZÁÉÍÓÚÑ0-9]+/);
+    return palabras.every(function (w) { return suyas.indexOf(w) >= 0; });
+  });
+  return hallados.length === 1 ? hallados[0] : null;
+}
+
+function _cg_f(d) {
+  if (!d) return "";
+  return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) +
+         "/" + d.getFullYear();
+}
+
+function _cg_dia(f) {
+  var p = String(f || "").split("/");
+  if (p.length !== 3) return null;
+  var d = new Date(+p[2], +p[1] - 1, +p[0]);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function _cg_gantt(O, vistas, C, GRANO) {
+  var conFecha = vistas.filter(function (p) {
+    return p.estado !== "Sin programar" && _cg_dia(p.ini) && _cg_dia(p.fin);
+  });
+  var sinFecha = vistas.length - conFecha.length;
+  if (!conFecha.length) {
+    return '<div class="tarjeta"><p class="mas">ninguna de las ' +
+      ent(vistas.length) + ' partidas que se ven tiene fecha propia · Obra</p></div>';
+  }
+  var t0 = null, t1 = null;
+  conFecha.forEach(function (p) {
+    var a = _cg_dia(p.ini), b = _cg_dia(p.fin);
+    if (!t0 || a < t0) t0 = a;
+    if (!t1 || b > t1) t1 = b;
+  });
+  var span = Math.max(1, (t1 - t0) / 86400000);
+  var hoy = _cg_dia(C.corte);
+  var pos = function (d) { return 100 * ((d - t0) / 86400000) / span; };
+
+  var enPista = function (d) {
+    return 'calc(var(--cg-nom) + var(--cg-hueco) + ' +
+           '(100% - var(--cg-nom) - var(--cg-fechas)) * ' +
+           (pos(d) / 100).toFixed(4) + ')';
+  };
+  var marcas = '', cur = new Date(t0.getFullYear(), t0.getMonth(), 1);
+  var MES3 = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set",
+              "Oct", "Nov", "Dic"];
+  while (cur <= t1) {
+    var x = pos(cur);
+    if (x >= 0 && x <= 100) {
+      marcas += '<span class="cg-marca" data-m="' + cur.getMonth() + '" style="left:' +
+        enPista(cur) + '">' +
+        MES3[cur.getMonth()] + (cur.getMonth() === 0 ? " " + cur.getFullYear() : "") +
+        '</span>';
+    }
+    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+  }
+  var lineaHoy = (hoy && hoy >= t0 && hoy <= t1)
+    ? '<span class="cg-hoy" style="left:' + enPista(hoy) + '"></span>' : '';
+
+  var f2 = function (d) {
+    return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) +
+           "/" + d.getFullYear();
+  };
+  var porCap = [];
+  (O.caps || []).forEach(function (c) {
+    var ps = (c.partidas || []).filter(function (p) {
+      return conFecha.indexOf(p) >= 0; });
+    if (ps.length) porCap.push({nombre: c.nombre, esp: c.esp, wbs: c.wbs,
+                                partidas: ps});
+  });
+
+  var fases = porCap.map(function (c) {
+    var ini = null, fin = null, dias = 0;
+    c.partidas.forEach(function (p) {
+      var a = _cg_dia(p.ini), b = _cg_dia(p.fin);
+      if (!ini || a < ini) ini = a;
+      if (!fin || b > fin) fin = b;
+      dias += (p.dias || 0);
+    });
+    var est = (hoy && fin < hoy) ? "Vencida"
+            : (hoy && ini <= hoy && hoy <= fin) ? "En curso" : "Por arrancar";
+    var venc = c.partidas.filter(function (p) { return p.estado === "Vencida"; }).length;
+    return {nombre: c.nombre, esp: c.esp, wbs: c.wbs, ini: ini, fin: fin,
+            n: c.partidas.length, estado: est, vencidas: venc,
+            dias: Math.round((fin - ini) / 86400000) + 1};
+  });
+
+  var esFase = (GRANO !== "partida");
+  var COL = _cr_colores(O), leySec = "", vistas1 = {};
+  porCap.forEach(function (c) {
+    if (!c.esp || vistas1[c.esp]) return;
+    vistas1[c.esp] = 1;
+    leySec += '<span><i class="cg-pt" style="background:' + COL[c.esp] + '"></i>' +
+      esc(_cr_esp(c)) + '</span>';
+  });
+  var h = '<div class="tarjeta">' +
+    '<h3 class="d-tit">Gantt · ' + esc(O.obra) + '</h3>' +
+    '<p class="d-sub">' + ent(conFecha.length) + ' partidas con fecha · ' +
+    f2(t0) + ' a ' + f2(t1) +
+    (sinFecha ? ' · ' + ent(sinFecha) + ' sin fecha propia, fuera del gráfico' : '') +
+    '</p>' +
+    '<div class="d-leyenda cg-ley">' +
+    '<span><i class="cg-pt cg-curso"></i>En curso</span>' +
+    '<span><i class="cg-pt cg-venc"></i>Venció</span>' +
+    '<span><i class="cg-pt cg-porv"></i>Por arrancar</span>' +
+    '<span><i class="cg-pt cg-hoyp"></i>Hoy · ' + esc(C.corte) + '</span>' +
+    '</div>' +
+    (leySec ? '<div class="d-leyenda cg-ley cg-leysec">' + leySec + '</div>' : '') +
+    '<div class="st-tipos cg-grano">' +
+    '<button type="button" class="st-pill' + (esFase ? ' st-pill-on' : '') +
+    '" data-g="fase">Por fase · ' + ent(fases.length) + '</button>' +
+    '<button type="button" class="st-pill' + (esFase ? '' : ' st-pill-on') +
+    '" data-g="partida">Por partida · ' + ent(conFecha.length) + '</button>' +
+    '</div>' +
+    '<div class="cg-regla">' + marcas + '</div>' +
+    '<div class="cg-gantt' + (esFase ? ' cg-fases' : '') + '">' + lineaHoy;
+
+  var fila = function (nom, tit, ini, fin, dias, estado, clase, color) {
+    var a = _cg_dia(ini), b = _cg_dia(fin);
+    var izq = pos(a), ancho = Math.max(0.6, pos(b) - izq);
+    return '<div class="cg-fila' + (clase ? ' ' + clase : '') +
+      (color ? ' cg-consec" style="--sec:' + color : '') + '">' +
+      '<span class="cg-nom" title="' + esc(tit) + '">' + esc(nom) + '</span>' +
+      '<span class="cg-pista">' +
+      '<i class="cg-barra ' + _cr_clase(estado) + '" style="left:' +
+      izq.toFixed(2) + '%;width:' + ancho.toFixed(2) + '%" title="' +
+      esc(ini + ' → ' + fin + ' · ' + estado) + '"></i></span>' +
+      '<span class="cg-f1">' + esc(ini) + '</span>' +
+      '<span class="cg-f1">' + esc(fin) + '</span>' +
+      '<span class="cg-f1 cg-dias">' + (dias ? ent(dias) + ' d' : '—') + '</span>' +
+      '</div>';
+  };
+
+  if (esFase) {
+    fases.forEach(function (f) {
+      h += fila((f.wbs ? f.wbs + ' ' : '') + f.nombre,
+                f.wbs + ' · ' + f.nombre + ' · ' + f.n + ' partidas' +
+                (f.vencidas ? ' · ' + f.vencidas + ' vencida(s)' : ''),
+                _cg_f(f.ini), _cg_f(f.fin), f.dias, f.estado, 'cg-esfase',
+                COL[f.esp]);
+    });
+  } else {
+    porCap.forEach(function (c) {
+      h += '<div class="cg-cap' + (c.esp ? ' cg-consec" style="--sec:' + COL[c.esp] : '') +
+        '"><span>' + _cr_sec(c, COL) +
+        esc(c.wbs ? c.wbs + ' ' : '') + esc(c.nombre) + '</span></div>';
+      c.partidas.forEach(function (p) {
+        h += fila((p.wbs ? p.wbs + ' ' : '') + p.nombre, p.wbs + ' · ' + p.nombre,
+                  p.ini, p.fin, p.dias,
+                  p.estado, '', COL[c.esp]);
+      });
+    });
+  }
+  return h + '</div></div>';
+}
+
+function _cg_curva(V, O) {
+  var c = V.curva || {};
+  var prog = c.programado || [], ejec = c.ejecutado || [];
+  if (!prog.length && !ejec.length) {
+    return '<div class="tarjeta"><h3 class="d-tit">Curva S · ' + esc(V.obra) +
+      '</h3><p class="mas">sin hoja GRAFICA · Obra</p></div>';
+  }
+  var meses = prog.map(function (p) { return p.mes; });
+  ejec.forEach(function (e) { if (meses.indexOf(e.mes) < 0) meses.push(e.mes); });
+  var deMes = function (lista, m) {
+    var x = lista.filter(function (p) { return p.mes === m; })[0];
+    return x ? x : null;
+  };
+  var maxi = 0;
+  prog.concat(ejec).forEach(function (p) {
+    maxi = Math.max(maxi, p.acumulado || 0); });
+  if (!maxi) maxi = 1;
+
+  var alto = 150;
+  var py = function (v) { return alto - alto * (v / maxi); };
+
+  var ancho = 1000;   /* unidades del viewBox · ver el comentario del SVG */
+  var px = function (i) { return meses.length < 2 ? 0 : ancho * i / (meses.length - 1); };
+  var rejilla = '';
+  [0, 25, 50, 75, 100].forEach(function (q) {
+    var y = py(maxi * q / 100);
+    rejilla += '<line class="cg-rej" x1="0" y1="' + y.toFixed(1) +
+      '" x2="' + ancho + '" y2="' + y.toFixed(1) + '"/>';
+  });
+
+  var linea = function (lista, clase) {
+    var pts = [], circ = '';
+    meses.forEach(function (m, i) {
+      var x = deMes(lista, m);
+      if (x && x.acumulado !== null && x.acumulado !== undefined) {
+        var cx = px(i), cy = py(x.acumulado);
+        pts.push(cx.toFixed(2) + "," + cy.toFixed(1));
+        circ += '<circle class="' + clase + '" cx="' + cx.toFixed(2) +
+          '" cy="' + cy.toFixed(1) + '" r="9"><title>' +
+          esc(m + ' · ' + soles(x.acumulado) +
+              (x.pct_acumulado !== null && x.pct_acumulado !== undefined
+                ? ' · ' + fmt1(100 * x.pct_acumulado) + '%' : '')) +
+          '</title></circle>';
+      }
+    });
+    if (!pts.length) return '';
+    return (pts.length >= 2
+      ? '<polyline class="' + clase + '" points="' + pts.join(" ") + '"/>' : '') + circ;
+  };
+
+  var h = '<div class="tarjeta">' +
+    '<h3 class="d-tit">Curva S · ' + esc(V.obra) + '</h3>' +
+    '<p class="d-sub">costo directo ' + soles(V.presupuesto) + ' · valorizado ' +
+    soles(V.avance_monto) + ' · ' + fmt1(100 * (V.avance_pct || 0)) + '% · ' +
+    ent(c.valorizaciones || 0) +
+    ((c.valorizaciones || 0) === 1 ? ' valorización cargada' : ' valorizaciones cargadas') +
+    '</p>' +
+    '<div class="d-leyenda">' +
+    '<span><i style="background:#B9C6E4"></i>Programado</span>' +
+    '<span><i style="background:#1B3A7A"></i>Ejecutado</span></div>' +
+    '<div class="cg-envoltura"><div class="cg-eje">' +
+      [100, 75, 50, 25, 0].map(function (q) {
+        return '<span>' + q + '%</span>'; }).join("") + '</div>' +
+    '<svg class="cg-curva" viewBox="0 0 ' + ancho + ' ' + (alto + 4) +
+    '" preserveAspectRatio="none">' +
+    rejilla + linea(prog, "cg-prog") + linea(ejec, "cg-ejec") + '</svg>' +
+    '</div>' +
+    '<div class="cg-meses">' + meses.map(function (m) {
+      return '<span>' + esc(m) + '</span>'; }).join("") + '</div>';
+
+  h += '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+    '<th>Mes</th><th class="num">Programado</th><th class="num">% prog.</th>' +
+    '<th class="num">Ejecutado</th><th class="num">% ejec.</th>' +
+    '<th class="num">Diferencia</th></tr></thead><tbody>';
+  meses.forEach(function (m) {
+    var a = deMes(prog, m), b = deMes(ejec, m);
+    var ap = a && a.acumulado !== null ? a.acumulado : null;
+    var bp = b && b.acumulado !== null ? b.acumulado : null;
+    var dif = (ap !== null && bp !== null) ? bp - ap : null;
+    h += '<tr><td class="obra">' + esc(m) + '</td>' +
+      '<td class="num">' + (ap === null ? '<span class="raya">—</span>' : soles(ap)) + '</td>' +
+      '<td class="num">' + (a && a.pct_acumulado !== null && a.pct_acumulado !== undefined
+        ? fmt1(100 * a.pct_acumulado) + '%' : '<span class="raya">—</span>') + '</td>' +
+      '<td class="num">' + (bp === null ? '<span class="raya">—</span>' : soles(bp)) + '</td>' +
+      '<td class="num">' + (b && b.pct_acumulado !== null && b.pct_acumulado !== undefined
+        ? fmt1(100 * b.pct_acumulado) + '%' : '<span class="raya">—</span>') + '</td>' +
+      '<td class="num"' + (dif !== null && dif < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+      (dif === null ? '<span class="raya">—</span>' : (dif > 0 ? '+' : '') + soles(dif)) +
+      '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  return h + '</div>';
+}
+
+</script>
+</body>
+</html>

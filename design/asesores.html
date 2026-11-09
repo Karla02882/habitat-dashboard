@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asesores KPI · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-asesor"><label for="f-asesor">Vendedor</label><select id="f-asesor"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "asesores",
+  nombre: "Asesores KPI",
+  pregunta: "¿Cómo va cada asesor contra su meta?",
+  fuentes: ["KOMMO", "AXION"],
+
+  filtros: ["asesor"],
+  sinRazonObra: true,
+  _uHoras: true,
+
+  _col: function (valor, meta) {
+    if (valor === null || valor === undefined || !meta) return "";
+    var ok = (meta.mejor === "menor") ? (valor <= meta.meta) : (valor >= meta.meta);
+    if (ok) return "ok";
+    var casi = (meta.mejor === "menor") ? (valor <= meta.ambar) : (valor >= meta.ambar);
+    return casi ? "casi" : "mal";
+  },
+
+  _celda: function (valor, meta, texto) {
+    var c = this._col(valor, meta);
+    var cls = c === "ok" ? "sem-ok" : (c === "casi" ? "sem-casi" : (c === "mal" ? "sem-mal" : ""));
+    return '<td class="num ' + cls + '">' + texto + '</td>';
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var KA = ((M.crm || {}).kpis_asesor) || {};
+    var MET = D.metas_asesor || {};
+    if (!KA.hay || !(KA.asesores || []).length) {
+      return '<div class="d-lienzo"><div class="d-carta">' +
+        '<div class="d-cifra">—</div>' +
+        '<div class="d-exacta">el CRM no devolvió asesores en este período</div>' +
+        '</div></div>';
+    }
+
+    var norm = function (s) {
+      return String(s || "").toUpperCase()
+        .replace(/[ÁÀÄÂ]/g, "A").replace(/[ÉÈËÊ]/g, "E")
+        .replace(/[ÍÌÏÎ]/g, "I").replace(/[ÓÒÖÔ]/g, "O")
+        .replace(/[ÚÙÜÛ]/g, "U").replace(/Ñ/g, "N")
+        .replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim();
+    };
+    var toks = function (s) {
+      return norm(s).split(" ").filter(function (x) { return x.length >= 4; });
+    };
+    var plata = {};
+    ((M.estructura || {}).modalidad || []).forEach(function (mo) {
+      (mo.detalle || []).forEach(function (v) {
+        var k = String(v.asesor || "—");
+        var o = plata[k] = plata[k] || {n: 0, s: 0, t: toks(k), v: []};
+        o.n++; o.s += v.precio || 0; o.v.push(v);
+      });
+    });
+    var deCRM = {};
+    (KA.asesores || []).forEach(function (a) {
+      deCRM[a.responsable] = {t: toks(a.responsable), leads: a.leads || 0};
+    });
+    var asignado = {}, usados = {}, dobles = [];
+    Object.keys(plata).forEach(function (k) {
+      var mejor = null, mejorN = 0, mejorL = -1, empatan = [];
+      Object.keys(deCRM).forEach(function (c) {
+        var comunes = 0;
+        plata[k].t.forEach(function (x) { if (deCRM[c].t.indexOf(x) >= 0) comunes++; });
+        if (comunes < 2) return;
+        var wa = norm(k).split(" "), wc = norm(c).split(" ");
+        if (wc.indexOf(wa[0]) < 0 && wa.indexOf(wc[0]) < 0) return;
+        empatan.push(c);
+        if (deCRM[c].leads > mejorL ||
+            (deCRM[c].leads === mejorL && comunes > mejorN)) {
+          mejor = c; mejorN = comunes; mejorL = deCRM[c].leads;
+        }
+      });
+      if (!mejor) return;
+      usados[k] = true;
+      var o = asignado[mejor] = asignado[mejor] || {n: 0, s: 0, v: []};
+      o.n += plata[k].n; o.s += plata[k].s;
+      o.v = o.v.concat(plata[k].v);
+      if (empatan.length > 1) dobles.push(empatan.join(' = '));
+    });
+
+    var filas = (KA.asesores || []).map(function (a) {
+      var p = asignado[a.responsable] || null;
+      return {a: a, monto: p ? p.s : 0, ventasAx: p ? p.n : 0,
+              vlist: p ? p.v : [],
+              ticket: (p && p.n) ? p.s / p.n : null};
+    });
+    var dobleU = [];
+    dobles.forEach(function (x) { if (dobleU.indexOf(x) < 0) dobleU.push(x); });
+    var sinCRM = Object.keys(plata).filter(function (k) { return !usados[k]; })
+      .map(function (k) { return {nombre: k, n: plata[k].n, s: plata[k].s}; })
+      .sort(function (x, y) { return y.s - x.s; });
+    var sinCRMs = 0, sinCRMn = 0;
+    sinCRM.forEach(function (x) { sinCRMs += x.s; sinCRMn += x.n; });
+    if (ASESOR) {
+      filas = filas.filter(function (f) {
+        return String(f.a.responsable).toUpperCase() === String(ASESOR).toUpperCase();
+      });
+    }
+
+    var h = '<div class="d-lienzo">';
+
+    var tLeads = 0, tVentas = 0, tMonto = 0, cumplen = 0, conMeta = 0;
+    var respL = [];
+    filas.forEach(function (f) {
+      tLeads += f.a.leads; tVentas += f.ventasAx; tMonto += (f.monto || 0);
+      if (f.a.respuesta_min !== null && f.a.respuesta_min !== undefined)
+        respL.push(f.a.respuesta_min);
+      if (MET.ventas) { conMeta++; if (f.ventasAx >= MET.ventas.meta) cumplen++; }
+    });
+    respL.sort(function (x, y) { return x - y; });
+    var dur = function (m) {
+      if (m === null || m === undefined) return '—';
+      return self._uHoras ? fmt1(m / 60) + ' h' : fmt1(m) + ' min';
+    };
+    this._dur = dur;
+    var respMed = respL.length
+      ? (respL.length % 2 ? respL[(respL.length - 1) / 2]
+         : (respL[respL.length / 2 - 1] + respL[respL.length / 2]) / 2)
+      : null;
+
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-kpi-saldo"><div class="d-cab">' +
+        '<span class="d-chip">◍</span><span class="d-preg">¿Cuántos llegan a la meta?</span></div>' +
+        '<div class="d-cifra">' + ent(cumplen) + ' de ' + ent(filas.length) + '</div>' +
+        '<div class="d-exacta">' + (MET.ventas
+          ? 'meta ' + ent(MET.ventas.meta) + ' ventas por asesor' : 'sin meta cargada') + '</div>' +
+        '<div class="d-pie">' + ent(tVentas + (ASESOR ? 0 : sinCRMn)) +
+        ' contratos firmados · AXION</div></div>' +
+      '<div class="d-carta"><div class="d-cab">' +
+        '<span class="d-chip">⏱</span><span class="d-preg">¿Qué tan rápido responden?</span></div>' +
+        '<div class="d-cifra' + (MET.respuesta_min && respMed !== null && respMed > MET.respuesta_min.meta
+          ? '" style="color:var(--rojo)' : '') + '">' +
+        dur(respMed) + '</div>' +
+        '<div class="d-exacta">mediana del equipo · ' + ent(filas.length) + ' asesores</div>' +
+        '<div class="d-pie">' + (MET.respuesta_min
+          ? '<span class="d-tag">meta ' + dur(MET.respuesta_min.meta) + '</span>'
+          : '') +
+        '<button type="button" id="as-min-h" class="d-tag" style="cursor:pointer;border:0">' +
+        'ver en ' + (self._uHoras ? 'min' : 'h') + '</button></div></div>' +
+      '<div class="d-carta"><div class="d-cab">' +
+        '<span class="d-chip">☏</span><span class="d-preg">¿Cuántos leads recibieron?</span></div>' +
+        '<div class="d-cifra">' + ent(tLeads) + '</div>' +
+        '<div class="d-exacta">del CRM · el reparto se ve abajo</div>' +
+        '<div class="d-pie">' + (tLeads && tVentas
+          ? fmt1(tLeads / tVentas) + ' leads (CRM) por contrato (AXION)'
+          : 'sin ventas') + '</div></div>' +
+      '<div class="d-carta d-abrible abrible" data-abre="as-cruce" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab">' +
+        '<span class="d-chip">◈</span><span class="d-preg">¿Cuánto vendieron?</span></div>' +
+        '<div class="d-cifra">' + solesM(ASESOR ? tMonto : tMonto + sinCRMs) + '</div>' +
+        '<div class="d-exacta">' + soles(ASESOR ? tMonto : tMonto + sinCRMs) +
+        ' · AXION</div>' +
+        '<div class="d-pie">' + (!ASESOR && sinCRM.length
+          ? soles(tMonto) + ' de asesores del CRM <span class="d-tag mal">' +
+            solesM(sinCRMs) + '</span>de ' + ent(sinCRM.length) + ' fuera del CRM'
+          : (MET.monto
+             ? '<span class="d-tag">meta ' + solesM(MET.monto.meta) + '</span>por asesor'
+             : 'sin meta cargada')) + '</div></div>' +
+      '</div>' +
+      '<div class="detalle" id="det-as-cruce"></div>' +
+      '<div class="detalle" id="det-as-seg"></div>';
+
+    var _rank = function (titulo, meta, sub, valOf, txtOf, menorMejor, abre) {
+      var L = filas.map(function (f) {
+        return {nom: f.a.responsable, v: valOf(f), t: txtOf(f)};
+      }).filter(function (x) { return x.v !== null && x.v !== undefined; });
+      var mx = 1;
+      L.forEach(function (x) { mx = Math.max(mx, Math.abs(x.v)); });
+      L.sort(function (a, b) { return menorMejor ? a.v - b.v : b.v - a.v; });
+      var c = '<div class="tarjeta" style="padding:var(--e4) var(--e2)">' +
+        '<span class="overline" style="padding:0 var(--e2)">' + esc(titulo) + '</span>' +
+        '<p class="d-sub" style="padding:0 var(--e2);margin:2px 0 0">' + sub + '</p>';
+      if (!L.length) {
+        return c + '<p class="linea-meta" style="margin:var(--e3) var(--e2) 0">' +
+          'ningún asesor tiene este dato en el período</p></div>';
+      }
+      c += '<table class="grafico-pb" style="margin-top:var(--e3)"><tbody>';
+      L.forEach(function (x) {
+        var col = self._col(x.v, meta);
+        c += '<tr class="pb-clic abrible" data-abre="' + abre + ixDe[x.nom] +
+          '" aria-expanded="false" tabindex="0" role="button">' +
+          '<td class="pb-nom" title="' + esc(x.nom) + '">' + esc(x.nom) + '</td>' +
+          '<td class="pb-barra"><span class="' +
+          (col === "ok" ? "b-ok" : (col === "casi" ? "b-casi" : (col === "mal" ? "b-mal" : ""))) +
+          '" style="width:' + Math.max(2, Math.round(100 * Math.abs(x.v) / mx)) +
+          '%"></span></td>' +
+          '<td class="pb-cif">' + x.t + '</td></tr>';
+      });
+      return c + '</tbody></table></div>';
+    };
+
+
+    var AX = (M.asesores_axion || {});
+    var _rankAx = function (titulo, sub, valor, texto) {
+      var vivos = (AX.asesores || []).filter(function (x) {
+        return valor(x) !== null && valor(x) !== undefined; });
+      vivos.sort(function (a, b) { return valor(b) - valor(a); });
+      var h2 = '<div class="tarjeta" style="padding:var(--e4) var(--e2)">' +
+        '<span class="overline" style="padding:0 var(--e2)">' + esc(titulo) + '</span>' +
+        '<p class="d-sub" style="padding:0 var(--e2);margin:2px 0 0">' + esc(sub) + '</p>';
+      if (!vivos.length) {
+        return h2 + '<div class="hueco-kpi"><b>NO HAY DATOS</b>' +
+          '<span>(nadie lo tiene cargado en AXION)</span>' +
+          '<span class="ob-sub">Comercial</span></div></div>';
+      }
+      h2 += '<div class="envoltura-tabla"><table class="datos"><tbody>';
+      vivos.slice(0, 8).forEach(function (x) {
+        h2 += '<tr><td class="obra">' + esc(x.asesor) + '</td>' +
+          '<td class="num">' + texto(x) + '</td></tr>';
+      });
+      if (vivos.length > 8) {
+        h2 += filaOtros('… ' + ent(vivos.length - 8) + ' asesores más', '<td class="num"></td>',
+          vivos.slice(8).map(function (x) {
+            return '<td class="obra">' + esc(x.asesor) + '</td>' +
+              '<td class="num">' + texto(x) + '</td>'; }));
+      }
+      h2 += '</tbody></table></div>';
+      if (AX.con_carga < AX.total) {
+        h2 += '<p class="d-sub" style="padding:0 var(--e2)">' +
+          ent(AX.total - AX.con_carga) + ' sin cargar · Comercial</p>';
+      }
+      return h2 + '</div>';
+    };
+
+    var ixDe = {};
+    filas.forEach(function (f, i) { ixDe[f.a.responsable] = i; });
+
+    var metaTxt = function (m, suf) {
+      var f = function (v) {
+        return suf === 'S/' ? solesM(v) : ent(v) + (suf ? ' ' + suf : '');
+      };
+      return m ? ('meta ' + f(m.meta) + (m.ambar !== null && m.ambar !== undefined
+                  ? ' · ámbar ' + f(m.ambar) : '')) : 'sin meta cargada';
+    };
+
+    var VK = (window.REGISTRO || {})["ventas-kpi"];
+    if (VK && VK._diezHtml) h += VK._diezHtml(M, D);
+
+    h += '<div class="rejilla-3" style="margin-bottom:var(--e4)">' +
+      _rank('Tiempo de 1ª respuesta', MET.respuesta_min,
+        (MET.respuesta_min ? 'meta ' + dur(MET.respuesta_min.meta) +
+          (MET.respuesta_min.ambar !== null && MET.respuesta_min.ambar !== undefined
+            ? ' · ámbar ' + dur(MET.respuesta_min.ambar) : '') : 'sin meta cargada') +
+        ' · del lead a la llamada',
+        function (f) { return f.a.respuesta_min; },
+        function (f) { return dur(f.a.respuesta_min); }, true, "as-t-") +
+      _rank('Seguimientos realizados', MET.pct_seguimiento,
+        metaTxt(MET.pct_seguimiento, '%') + ' · contactados con Llamada Seguimiento 1',
+        function (f) { return f.a.pct_seguimiento; },
+        function (f) { return fmt1(f.a.pct_seguimiento) + '%' +
+          '<span class="ob-sub"> ' + ent(f.a.seguimientos) + '</span>'; }, false, "as-s-")
+        .replace(/<\/div>$/, '<p class="linea-meta abrible" data-abre="as-seg" ' +
+          'aria-expanded="false" tabindex="0" role="button" style="margin:var(--e3) var(--e2) 0;' +
+          'cursor:pointer;color:var(--navy-700);text-decoration:underline">' +
+          'Ver cuántos seguimientos tuvo cada cliente</p></div>') +
+      _rank('Leads recibidos', null,
+        'sin meta en la tabla · reparto del CRM',
+        function (f) { return f.a.leads; },
+        function (f) { return ent(f.a.leads); }, false, "as-l-") +
+      '</div>';
+
+    h += '<div class="rejilla-3" style="margin-bottom:var(--e4)">' +
+      _rankAx('Visitas agendadas · AXION',
+        'lo que Comercial carga en AXION, módulo Asesores',
+        function (x) { return x.agendas; },
+        function (x) { return ent(x.agendas) +
+          '<span class="ob-sub"> ' + ent(x.visitas) + ' concretadas</span>'; }) +
+      _rankAx('Visitas concretadas · AXION',
+        'de las agendadas, cuántas se hicieron',
+        function (x) { return x.pct_visitas; },
+        function (x) { return fmt1(x.pct_visitas) + '%' +
+          '<span class="ob-sub"> ' + ent(x.visitas) + ' de ' + ent(x.agendas) + '</span>'; }) +
+      _rankAx('Leads propios · AXION',
+        'los que el asesor trajo, no los que le asignaron',
+        function (x) { return x.leads_propios; },
+        function (x) { return ent(x.leads_propios); }) +
+      '</div>';
+
+    h += '<div class="rejilla-4" style="margin-bottom:var(--e4)">' +
+      _rank('Ventas cerradas', MET.ventas,
+        metaTxt(MET.ventas, '') +
+        ((MET.ventas || {}).desglose ? ' · ' + esc(MET.ventas.desglose) : '') +
+        ' · contrato firmado en AXION',
+        function (f) { return f.ventasAx; },
+        function (f) { return ent(f.ventasAx); }, false, "as-v-") +
+      _rank('Monto vendido', MET.monto,
+        metaTxt(MET.monto, 'S/') + ' · AXION',
+        function (f) { return f.monto; },
+        function (f) { return solesM(f.monto); }, false, "as-v-") +
+      _rank('Ticket promedio', null,
+        'sin meta en la tabla · monto ÷ ventas',
+        function (f) { return f.ticket; },
+        function (f) { return solesM(f.ticket); }, false, "as-v-") +
+      _rank('% Lead → venta', null,
+        'sin meta en la tabla · contratos AXION ÷ leads del CRM',
+        function (f) { return f.a.leads ? 100 * f.ventasAx / f.a.leads : null; },
+        function (f) { return fmt1(100 * f.ventasAx / f.a.leads) + '%'; }, false, "as-v-") +
+      '</div>';
+
+    filas.forEach(function (f, i) {
+      ["t", "s", "l", "v"].forEach(function (k) {
+        h += '<div class="detalle" id="det-as-' + k + '-' + i + '"></div>';
+      });
+    });
+    this._filas = filas;
+
+    var totAx = 0, totCRM = 0;
+    filas.forEach(function (f) { totAx += f.ventasAx; totCRM += f.a.ventas; });
+    this._cruce = {totAx: totAx, totCRM: totCRM, sinCRM: sinCRM,
+                   sinCRMs: sinCRMs, sinCRMn: sinCRMn, dobleU: dobleU};
+    h += '</div>';
+
+    h += '</div>';
+    return h;
+  },
+
+  detalle: function (id) {
+    /* las ventanas de los diez indicadores son de Ventas KPI */
+    if (String(id).indexOf("kv-") === 0) {
+      var VK = (window.REGISTRO || {})["ventas-kpi"];
+      return VK ? VK.detalle(id) : null;
+    }
+    if (String(id).indexOf("as-") !== 0) return null;
+    var NE = "No existe";
+    if (id === "as-seg") {
+      var FS = (this._filas || []).filter(function (f) { return f.a.seg_dist; });
+      var prom = function (d, c) { return c ? (d[1] + 2 * d[2] + 3 * d[3]) / c : null; };
+      FS.sort(function (x, y) {
+        return (prom(y.a.seg_dist, y.a.seg_clientes) || 0) - (prom(x.a.seg_dist, x.a.seg_clientes) || 0);
+      });
+      var tt = [0, 0, 0, 0], tc = 0;
+      var filasS = FS.map(function (f) {
+        var d = f.a.seg_dist, c = f.a.seg_clientes || 0;
+        tt[0] += d[0]; tt[1] += d[1]; tt[2] += d[2]; tt[3] += d[3]; tc += c;
+        return [esc(f.a.responsable), ent(c), ent(d[0]), ent(d[1]), ent(d[2]), ent(d[3])];
+      });
+      return '<button class="cerrar">Cerrar</button>' +
+        '<h3>Seguimientos por cliente · sin los leads desestimados</h3>' +
+        gtTabla([{rot: "Asesor"}, {rot: "Clientes", num: true}, {rot: "Sin seguimiento", num: true},
+                 {rot: "1 llamada", num: true}, {rot: "2 llamadas", num: true},
+                 {rot: "3 llamadas", num: true}],
+          filasS, ["Total", ent(tc), ent(tt[0]), ent(tt[1]), ent(tt[2]), ent(tt[3])]);
+    }
+    if (id === "as-cruce") {
+      var C = this._cruce || {};
+      var dobleDe = {};
+      (C.dobleU || []).forEach(function (x) {
+        String(x).split(" = ").forEach(function (nom) { dobleDe[nom] = true; });
+      });
+      var tN = 0, tV = 0, tM = 0;
+      var t2 = '<button class="cerrar">Cerrar</button>' +
+        '<h3>AXION contra el CRM, por asesor</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Asesor</th><th class="num">Contratos AXION</th>' +
+        '<th class="num">VENDIDO en el CRM</th><th class="num">Monto AXION</th>' +
+        '</tr></thead><tbody>';
+      (this._filas || []).slice().sort(function (a, b) {
+        return b.ventasAx - a.ventasAx; }).forEach(function (f) {
+        tN += f.ventasAx; tV += f.a.ventas; tM += f.monto || 0;
+        t2 += '<tr><td class="obra">' + esc(f.a.responsable) +
+          (dobleDe[f.a.responsable]
+            ? ' <span class="ob-sub">usuario repetido en el CRM · Comercial</span>' : '') +
+          '</td>' +
+          '<td class="num">' + ent(f.ventasAx) + '</td>' +
+          '<td class="num">' + ent(f.a.ventas) + '</td>' +
+          '<td class="num">' + soles(f.monto || 0) + '</td></tr>';
+      });
+      if (!ASESOR) {
+        (C.sinCRM || []).forEach(function (x) {
+          tN += x.n; tM += x.s;
+          t2 += '<tr><td class="obra">' + esc(x.nombre) +
+            ' <span class="ob-sub">sin usuario del CRM</span></td>' +
+            '<td class="num">' + ent(x.n) + '</td>' +
+            '<td class="num">' + NE + '</td>' +
+            '<td class="num">' + soles(x.s) + '</td></tr>';
+        });
+      }
+      return t2 + '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + ent(tN) + '</td><td class="num">' + ent(tV) + '</td>' +
+        '<td class="num">' + soles(tM) + '</td></tr></tbody></table></div>';
+    }
+
+    var m = /^as-([tslv])-(\d+)$/.exec(String(id));
+    if (!m) return null;
+    var f = (this._filas || [])[parseInt(m[2], 10)];
+    if (!f) return null;
+    var a = f.a;
+    var t = '<button class="cerrar">Cerrar</button>';
+    var n1 = function (v) {
+      return (v === null || v === undefined) ? NE
+        : Number(v).toLocaleString("es-PE", {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    };
+    var filaNE = function (cols) {
+      var c = '<tr>';
+      for (var k = 0; k < cols; k++) c += '<td class="' + (k ? 'num' : 'obra') + '">' + NE + '</td>';
+      return c + '</tr>';
+    };
+
+    if (m[1] === "t") {
+      var MR = (D.metas_asesor || {}).respuesta_min || {};
+      var sem = function (v) {
+        if (v === null || v === undefined || MR.meta === undefined) return '';
+        var amb = (MR.ambar !== undefined && MR.ambar !== null) ? MR.ambar : MR.meta * 2;
+        return v <= MR.meta ? ' sem-ok' : (v <= amb ? ' sem-casi' : ' sem-mal');
+      };
+      var fila = function (rot, sub, d, total) {
+        d = d || {};
+        var med = d.min, pro = d.prom_min;
+        return '<tr' + (total ? ' class="total"' : '') + '><td class="obra">' + rot +
+          (sub ? '<span class="ob-sub"> ' + sub + '</span>' : '') + '</td>' +
+          '<td class="num">' + ent(d.leads || 0) + '</td>' +
+          '<td class="num">' + (d.con === undefined ? NE : ent(d.con)) + '</td>' +
+          '<td class="num">' + (d.antes === undefined ? NE : ent(d.antes)) + '</td>' +
+          '<td class="num' + sem(med) + '">' + n1(med === null || med === undefined ? null : med / 60) + '</td>' +
+          '<td class="num">' + n1(pro === null || pro === undefined ? null : pro / 60) + '</td></tr>';
+      };
+      var MO = a.momento || {};
+      var corte = function (x) {
+        x = x || {};
+        return {leads: x.leads, con: x.con_llamada, antes: x.antes, min: x.min, prom_min: x.prom_min};
+      };
+      return t + '<h3>Tiempo de 1ª respuesta · ' + esc(a.responsable) + '</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cuándo entró el lead</th><th class="num">Leads</th>' +
+        '<th class="num">Con llamada</th><th class="num">Llamada antes del lead</th>' +
+        '<th class="num">Mediana (h)</th><th class="num">Promedio (h)</th>' +
+        '</tr></thead><tbody>' +
+        fila('Horario laboral', 'día hábil, 9 a 18', corte(MO.laboral)) +
+        fila('Fuera de horario', 'día hábil, antes de 9 o después de 18', corte(MO.fuera)) +
+        fila('Fin de semana', '', corte(MO.finde)) +
+        fila('TOTAL', '', {leads: a.leads, con: a.con_llamada, antes: a.llamada_antes,
+                           min: a.respuesta_min, prom_min: a.respuesta_prom_min}, true) +
+        '</tbody></table></div>';
+    }
+
+    if (m[1] === "s") {
+      var sd = a.seg_dist || [], sc = a.seg_clientes || 0;
+      var ts = t + '<h3>Seguimientos por cliente · ' + esc(a.responsable) +
+        ' · sin los leads desestimados</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Llamadas de seguimiento</th><th class="num">Clientes</th>' +
+        '<th class="num">% de sus clientes</th></tr></thead><tbody>';
+      var te = [0, 0, 0, 0], tce = 0;
+      (this._filas || []).forEach(function (g) {
+        var d2 = g.a.seg_dist || [];
+        for (var z = 0; z < 4; z++) te[z] += d2[z] || 0;
+        tce += g.a.seg_clientes || 0;
+      });
+      ts = ts.replace('<th class="num">% de sus clientes</th>',
+        '<th class="num">% de sus clientes</th><th class="num">% del equipo</th>');
+      if (!sd.length) return ts + filaNE(4) + '</tbody></table></div>';
+      ["Sin seguimiento", "1 llamada", "2 llamadas", "3 llamadas"].forEach(function (r, k) {
+        ts += '<tr><td class="obra">' + r + '</td>' +
+          '<td class="num">' + ent(sd[k] || 0) + '</td>' +
+          '<td class="num">' + (sc ? fmt1(100 * (sd[k] || 0) / sc) + '%' : NE) + '</td>' +
+          '<td class="num">' + (tce ? fmt1(100 * te[k] / tce) + '%' : NE) + '</td></tr>';
+      });
+      var prS = sc ? ((sd[1] || 0) + 2 * (sd[2] || 0) + 3 * (sd[3] || 0)) / sc : null;
+      var prE = tce ? (te[1] + 2 * te[2] + 3 * te[3]) / tce : null;
+      return ts + '<tr class="total"><td class="obra">TOTAL · ' +
+        (prS === null ? NE : fmt1(prS) + ' llamadas por cliente') +
+        (prE === null ? '' : ' · equipo ' + fmt1(prE)) + '</td>' +
+        '<td class="num">' + ent(sc) + '</td>' +
+        '<td class="num">' + (sc ? '100.0%' : NE) + '</td>' +
+        '<td class="num">' + (tce ? '100.0%' : NE) + '</td></tr></tbody></table></div>';
+    }
+
+    if (m[1] === "l") {
+      var FL = filasCRM(D, P).filter(function (r) { return r.responsable === a.responsable; });
+      var et = {};
+      FL.forEach(function (r) { var k = r.etapa || NE; et[k] = (et[k] || 0) + 1; });
+      var orden = Object.keys(et).sort(function (x, y) { return et[y] - et[x]; });
+      var conL = {}, horasE = {};
+      FL.forEach(function (r) {
+        var k = r.etapa || NE;
+        if (String(r.primera_llamada || "").trim()) conL[k] = (conL[k] || 0) + 1;
+        if (r.horas_atencion !== null && r.horas_atencion !== undefined && r.horas_atencion >= 0)
+          (horasE[k] = horasE[k] || []).push(r.horas_atencion);
+      });
+      var medH = function (l) {
+        if (!l || !l.length) return null;
+        var s = l.slice().sort(function (x, y) { return x - y; }), n = s.length;
+        return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+      };
+      var todasH = [];
+      Object.keys(horasE).forEach(function (k) { todasH = todasH.concat(horasE[k]); });
+      var tl = t + '<h3>Leads recibidos · ' + esc(a.responsable) + ' · etapa actual en el CRM</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Etapa</th><th class="num">Leads</th><th class="num">% de sus leads</th>' +
+        '<th class="num">Con primera llamada</th><th class="num">Sin primera llamada</th>' +
+        '<th class="num">Mediana 1ª respuesta (h)</th>' +
+        '</tr></thead><tbody>';
+      if (!FL.length) return tl + filaNE(6) + '</tbody></table></div>';
+      var tCon = 0;
+      var h1 = function (v) { return v === null ? NE : fmt1(v); };
+      orden.forEach(function (k) {
+        tCon += conL[k] || 0;
+        tl += '<tr><td class="obra">' + esc(k) + '</td>' +
+          '<td class="num">' + ent(et[k]) + '</td>' +
+          '<td class="num">' + fmt1(100 * et[k] / FL.length) + '%</td>' +
+          '<td class="num">' + ent(conL[k] || 0) + '</td>' +
+          '<td class="num">' + ent(et[k] - (conL[k] || 0)) + '</td>' +
+          '<td class="num">' + h1(medH(horasE[k])) + '</td></tr>';
+      });
+      return tl + '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + ent(FL.length) + '</td><td class="num">100.0%</td>' +
+        '<td class="num">' + ent(tCon) + '</td><td class="num">' + ent(FL.length - tCon) + '</td>' +
+        '<td class="num">' + h1(medH(todasH)) + '</td></tr>' +
+        '</tbody></table></div>';
+    }
+
+    /* v · SUS CONTRATOS DE AXION, uno por uno, del más grande al más chico. */
+    var vl = f.vlist || [];
+    var tv = t + '<h3>Contratos en AXION · ' + esc(a.responsable) + '</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Fecha</th><th>Obra</th><th>Unidad</th>' +
+      '<th class="num">Monto</th></tr></thead><tbody>';
+    if (!vl.length) return tv + filaNE(4) + '</tbody></table></div>';
+    var tot = 0;
+    vl.slice().sort(function (x, y) {
+      return (y.precio || 0) - (x.precio || 0); }).forEach(function (v) {
+      tot += v.precio || 0;
+      tv += '<tr><td class="gris">' + esc(v.fecha) + '</td>' +
+        '<td class="obra">' + esc(v.obra) + '</td>' +
+        '<td>' + esc(v.unidad) + '</td>' +
+        '<td class="num">' + soles(v.precio || 0) + '</td></tr>';
+    });
+    return tv + '<tr class="total"><td class="obra">TOTAL · ' + ent(vl.length) +
+      (vl.length === 1 ? ' contrato' : ' contratos') + '</td><td></td><td></td>' +
+      '<td class="num">' + soles(tot) + '</td></tr></tbody></table></div>';
+  },
+
+  conectar: function () {
+    var self = this;
+    var b = document.getElementById("as-min-h");
+    if (b) b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      self._uHoras = !self._uHoras;
+      pintar();
+    });
+    document.querySelectorAll("#hoja .grafico-pb tr.abrible").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var caja = document.getElementById("det-" + el.getAttribute("data-abre"));
+        setTimeout(function () {
+          if (caja && caja.classList.contains("on"))
+            caja.scrollIntoView({behavior: "smooth", block: "start"});
+        }, 80);
+      });
+    });
+  }
+};
+</script>
+</body>
+</html>

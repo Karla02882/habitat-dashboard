@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obras · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "obras-d",
+  nombre: "Obras",
+  pregunta: "¿Cómo van las obras?",
+  fuentes: ["AXION"],
+
+  ventanas: {},
+
+  pintar: function (M, D) {
+    var pp = perPartes();
+    var prefP = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+
+    var AF = D.avance_fisico || [];
+    var AV = D.avance || {};
+    var Fb = ((D.libro || {}).filas) || {};
+    var obrasN = Fb.obra || [];
+
+    var gastoObra = {}, filasObra = {}, gastoSinObra = 0;
+    (Fb.f || []).forEach(function (r) {
+      if (prefP && String(r[0] || "").indexOf(prefP) !== 0) return;
+      if (r[7] !== "gasto") return;
+      var ob = (r[5] !== null && r[5] !== undefined) ? obrasN[r[5]] : null;
+      if (ob) {
+        gastoObra[ob] = (gastoObra[ob] || 0) + (r[4] || 0);
+        (filasObra[ob] = filasObra[ob] || []).push(r);
+      }
+      else gastoSinObra += r[4] || 0;
+    });
+
+    var filas = [];
+    var vistos = {};
+    AF.forEach(function (a) {
+      if (!entraObra(a.obra)) return;
+      vistos[a.obra] = true;
+      var av = AV[a.obra] || {};
+      filas.push({obra: a.obra, etapa: String(a.etapa || "—"), fisico: a.pct,
+        vendPct: av.pct || 0, uv: av.u_vend || 0, ut: av.u_tot || 0,
+        gasto: gastoObra[a.obra] || 0});
+    });
+    Object.keys(gastoObra).forEach(function (ob) {
+      if (vistos[ob] || !entraObra(ob)) return;
+      var av = AV[ob] || {};
+      filas.push({obra: ob, etapa: "—", fisico: null,
+        vendPct: av.pct || 0, uv: av.u_vend || 0, ut: av.u_tot || 0,
+        gasto: gastoObra[ob]});
+    });
+    filas.sort(function (a, b) { return b.gasto - a.gasto; });
+
+    var gastoVisible = 0;
+    filas.forEach(function (f) { gastoVisible += f.gasto; });
+
+    var h = '<div class="d-lienzo">';
+
+    if (filas.length) {
+      h += '<div class="d-carta">' +
+        '<h3 class="d-tit">Proyecto por proyecto</h3>' +
+        '<p class="d-sub">inversión: egresos del Registro de Movimientos con proyecto' +
+        (gastoSinObra > 0 ? ' · sin proyecto: ' + soles(gastoSinObra) + ' · Administración' : '') +
+        '</p>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Proyecto</th><th>Etapa</th><th class="num">Avance físico</th>' +
+        '<th class="num">Vendido</th><th class="num">Unidades</th>' +
+        '<th class="num">Inversión realizada</th></tr></thead><tbody>';
+      filas.forEach(function (f, i) {
+        var abre = f.gasto ? ' class="abrible" data-abre="o-p' + i +
+          '" aria-expanded="false" tabindex="0" role="button"' : '';
+        h += '<tr' + abre + '><td class="obra">' + esc(f.obra) + '</td>' +
+          '<td>' + esc(f.etapa) + '</td>' +
+          '<td class="num">' + (f.fisico !== null && f.fisico !== undefined ?
+            fmt1(f.fisico) + '%' : '—') + '</td>' +
+          '<td class="num">' + fmt1(f.vendPct) + '%</td>' +
+          '<td class="num">' + ent(f.uv) + ' / ' + ent(f.ut) + '</td>' +
+          '<td class="num">' + (f.gasto ? soles(f.gasto) : '—') + '</td></tr>';
+      });
+      h += '<tr class="total"><td class="obra">TOTAL</td><td></td><td></td><td></td><td></td>' +
+        '<td class="num">' + soles(gastoVisible) + '</td></tr>';
+      h += '</tbody></table></div></div>';
+      filas.forEach(function (f, i) {
+        if (f.gasto) h += '<div class="detalle" id="det-o-p' + i + '"></div>';
+      });
+    }
+
+    h += '</div>';
+    this._filas = filas; this._filasObra = filasObra; this._Fb = Fb;
+    return h;
+  },
+
+  detalle: function (id, el) {
+    id = String(id);
+    if (id.indexOf("o-p") !== 0) return null;
+    var f = (this._filas || [])[Number(id.slice(3))];
+    if (!f) return null;
+    var Fb = this._Fb || {};
+    var nom = function (lista, i) {
+      var v = (i !== null && i !== undefined) ? (lista || [])[i] : "";
+      return v ? esc(v) : '—';
+    };
+    var rs = (this._filasObra[f.obra] || []).slice().sort(function (a, b) {
+      return String(b[0]).localeCompare(String(a[0])) || (b[4] - a[4]); });
+    var tot = 0;
+    var t = '<button class="cerrar">Cerrar</button>' +
+      '<h3>' + esc(f.obra) + ' · Inversión realizada</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Fecha</th><th>Movimiento</th><th>Categoría</th><th>Concepto</th>' +
+      '<th>Cuenta</th><th class="num">Monto</th></tr></thead><tbody>';
+    rs.forEach(function (r) {
+      tot += r[4] || 0;
+      t += '<tr><td>' + esc(r[0] || '—') + '</td>' +
+        '<td>' + nom(Fb.mov, r[1]) + '</td>' +
+        '<td>' + nom(Fb.cat, r[2]) + '</td>' +
+        '<td style="white-space:normal">' + (r[3] ? esc(r[3]) : '—') + '</td>' +
+        '<td style="white-space:normal">' + nom(Fb.cuenta, r[6]) + '</td>' +
+        '<td class="num">' + soles(r[4] || 0) + '</td></tr>';
+    });
+    t += '<tr class="total"><td class="obra" colspan="5">TOTAL · ' + ent(rs.length) +
+      (rs.length === 1 ? ' gasto' : ' gastos') + '</td>' +
+      '<td class="num">' + soles(tot) + '</td></tr>';
+    return t + '</tbody></table></div>';
+  },
+
+  conectar: function () {}
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: habitat-cockpit
+    runtime: python
+    plan: 0.5c-512mb
+    region: virginia
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -X utf8 scripts/servidor.py
+    healthCheckPath: /acceso
+    disk:
+      name: datos
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: AXION_API_BASE_URL
+        sync: false
+      - key: AXION_API_TOKEN
+        sync: false
+      - key: KOMMO_SUBDOMINIO
+        sync: false
+      - key: KOMMO_TOKEN
+        sync: false
+      - key: GOOGLE_CUENTA_SERVICIO
+        sync: false
+      - key: TABLERO_USUARIO
+        sync: false
+      - key: TABLERO_CLAVE
+        sync: false
+      - key: TABLERO_USUARIOS
+        sync: false
+      - key: TABLERO_SECRETO
+        generateValue: true
+      - key: TABLERO_REFRESCO_MIN
+        value: "60"
+      - key: CONTROLES_CADA_HORAS
+        value: "0"
+      - key: PYTHON_VERSION
+        value: "3.13.3"

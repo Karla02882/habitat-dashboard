@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compras · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "compras",
+  nombre: "Compras",
+  pregunta: "¿Qué se está comprando?",
+  fuentes: ["AXION"],
+
+
+  pintar: function (M, D) {
+    var pp = perPartes();
+    var fl = D.flujo || {};
+    var anioCaja = Number(fl.anio || 0);
+    var prefP = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+
+    var OC = (D.ordenes_compra || []).filter(function (o) {
+      if (prefP && String(o.fecha || "").indexOf(prefP) !== 0) return false;
+      return entraObra(String(o.obra || ""));
+    });
+    var total = 0, pendN = 0, pendS = 0;
+    var provs = {};
+    OC.forEach(function (o) {
+      total += o.total || 0;
+      if (String(o.estado || "").toLowerCase() === "pendiente") {
+        pendN++; pendS += o.total || 0;
+      }
+      var nomP = String(o.proveedor || "").replace(/\s+/g, " ").trim() || "—";
+      var p = provs[nomP] = provs[nomP] || {n: 0, s: 0};
+      p.n++; p.s += o.total || 0;
+    });
+    var provL = Object.keys(provs).map(function (k) {
+      return [k, provs[k].n, provs[k].s]; })
+      .sort(function (a, b) { return b[2] - a[2]; });
+    var mayor = provL.length ? provL[0] : null;
+
+    var h = '<div class="d-lienzo">';
+
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-abrible abrible" data-abre="p-ordenes" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">🛒</span><span class="d-preg">¿Cuánto se compró?</span></div>' +
+        '<div class="d-cifra">' + solesM(total) + '</div>' +
+        '<div class="d-exacta">' + soles(total) + ' · ' + ent(OC.length) + ' órdenes</div>' +
+        '<div class="d-pie">órdenes de compra de AXION</div></div>' +
+      '<div class="d-carta"><div class="d-cab"><span class="d-chip">⏳</span>' +
+        '<span class="d-preg">Pendiente de pago</span></div>' +
+        '<div class="d-cifra"' + (pendS > 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        solesM(pendS) + '</div>' +
+        '<div class="d-exacta">' + ent(pendN) + (pendN === 1 ? ' orden' : ' órdenes') + '</div>' +
+        '<div class="d-pie">estado «pendiente» en la orden</div></div>' +
+      '<div class="d-carta d-abrible abrible" data-abre="p-provs" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">⇄</span><span class="d-preg">Proveedores</span></div>' +
+        '<div class="d-cifra">' + ent(provL.length) + '</div>' +
+        '<div class="d-exacta">' + (mayor && total ?
+          esc(String(mayor[0]).length > 22 ? String(mayor[0]).slice(0, 21) + '…'
+            : String(mayor[0])) + ' concentra el ' +
+          fmt1(mayor[2] / total * 100) + '%' : '—') + '</div>' +
+        '<div class="d-pie">del período</div></div>' +
+      '</div>' +
+      '<div class="detalle" id="det-p-ordenes"></div>' +
+      '<div class="detalle" id="det-p-provs"></div>';
+
+    if (provL.length) {
+      h += '<div class="d-carta">' +
+        '<h3 class="d-tit">Por proveedor</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Proveedor</th><th class="num">Órdenes</th>' +
+        '<th class="num">Monto</th><th class="num">%</th></tr></thead><tbody>';
+      provL.forEach(function (r) {
+        h += '<tr><td class="obra">' + esc(r[0]) + '</td>' +
+          '<td class="num">' + ent(r[1]) + '</td>' +
+          '<td class="num">' + soles(r[2]) + '</td>' +
+          '<td class="num">' + (total ? fmt1(r[2] / total * 100) : '0.0') + '%</td></tr>';
+      });
+      h += '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + ent(OC.length) + '</td>' +
+        '<td class="num">' + soles(total) + '</td><td class="num">100%</td></tr>';
+      h += '</tbody></table></div></div>';
+    }
+
+    var mayores = OC.slice().sort(function (a, b) {
+      return (b.total || 0) - (a.total || 0); });
+    if (mayores.length) {
+      h += '<div class="d-carta"><h3 class="d-tit">Las cinco mayores órdenes</h3>' +
+        '<table class="d-top"><tbody>';
+      mayores.slice(0, 5).forEach(function (o) {
+        h += '<tr><td class="gris">' + esc(String(o.fecha || "")) + '</td><td>' +
+          esc(String(o.proveedor || "—") + ' · ' + String(o.obra || "—") +
+          (String(o.estado || "").toLowerCase() === "pendiente" ? ' · PENDIENTE' : '')) +
+          '</td><td>' + soles(o.total || 0) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    h += '</div>';
+    this._OC = OC; this._total = total; this._provL = provL; this._D = D;
+    return h;
+  },
+
+  detalle: function (id, el) {
+    var t = '<button class="cerrar">Cerrar</button>';
+    if (id === "p-ordenes") {
+      var empObra = (this._D || {}).empresa_de_obra || {};
+      var nomEmp = function (e) {
+        return String(e || "").replace(/ SOCIEDAD ANONIMA CERRADA$/, " S.A.C.")
+          .replace(/ EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA$/, " E.I.R.L.");
+      };
+      var items = {};
+      this._OC.forEach(function (o) {
+        (o.items || []).forEach(function (it) {
+          var prod = String(it.producto || "—"), ob = String(o.obra || "").trim();
+          var k = prod + "\u0001" + ob;
+          var x = items[k] = items[k] || {prod: prod, obra: ob, s: 0};
+          x.s += it.total || 0;
+        });
+      });
+      var itemsL = Object.keys(items).map(function (k) { return items[k]; })
+        .sort(function (a, b) { return b.s - a.s; });
+      var NEp = "No existe";
+      var tt = t + '<h3>Comprado · ' + soles(this._total) + '</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Producto</th><th>Proyecto</th><th>Empresa</th><th class="num">Monto</th>' +
+        '</tr></thead><tbody>';
+      if (!itemsL.length) {
+        tt += '<tr><td class="obra">' + NEp + '</td><td>' + NEp + '</td><td>' + NEp +
+          '</td><td class="num">' + NEp + '</td></tr>';
+      }
+      var sT = 0;
+      var celdasI = function (r) {
+        var emp = r.obra && empObra[r.obra] ? nomEmp(empObra[r.obra]) : NEp;
+        return '<td class="obra">' + esc(r.prod) + '</td>' +
+          '<td>' + (r.obra ? esc(r.obra) : NEp) + '</td>' +
+          '<td>' + esc(emp) + '</td>' +
+          '<td class="num">' + soles(r.s) + '</td>';
+      };
+      itemsL.forEach(function (r) { sT += r.s; });
+      itemsL.slice(0, 10).forEach(function (r) { tt += '<tr>' + celdasI(r) + '</tr>'; });
+      if (itemsL.length > 10) {
+        var rI = itemsL.slice(10), sR = 0;
+        rI.forEach(function (r) { sR += r.s; });
+        tt += filaOtros('… ' + ent(rI.length) + ' más', '<td></td><td></td>' +
+          '<td class="num">' + soles(sR) + '</td>', rI.map(celdasI));
+      }
+      if (itemsL.length) {
+        tt += '<tr class="total"><td class="obra">TOTAL · ' + ent(itemsL.length) +
+          (itemsL.length === 1 ? ' producto' : ' productos') + '</td><td></td><td></td>' +
+          '<td class="num">' + soles(sT) + '</td></tr>';
+      }
+      return tt + '</tbody></table></div>';
+    }
+    if (id === "p-provs") {
+      var tt2 = t + '<h3>Proveedores · ' + ent(this._provL.length) + '</h3>' +
+        '<table class="d-top"><tbody>';
+      var celdasP = function (r) {
+        return '<td class="gris">' + ent(r[1]) +
+          (r[1] === 1 ? ' orden' : ' órdenes') + '</td><td>' + esc(r[0]) +
+          '</td><td>' + soles(r[2]) + '</td>';
+      };
+      this._provL.slice(0, 5).forEach(function (r) { tt2 += '<tr>' + celdasP(r) + '</tr>'; });
+      if (this._provL.length > 5) {
+        var rP = this._provL.slice(5), nR = 0, mR = 0;
+        rP.forEach(function (r) { nR += r[1]; mR += r[2]; });
+        tt2 += filaOtros(ent(nR) + (nR === 1 ? ' orden' : ' órdenes'),
+          '<td>… ' + ent(rP.length) + ' proveedores más</td><td>' + soles(mR) + '</td>',
+          rP.map(celdasP), 'gris');
+      }
+      return tt2 + '</tbody></table>';
+    }
+    return null;
+  },
+
+  conectar: function () {}
+};
+</script>
+</body>
+</html>

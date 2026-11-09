@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Cotizaciones</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "cotizaciones",
+  nombre: "Cotizaciones",
+  titulo: "Cotizaciones de obra",
+  pregunta: "¿Qué está cotizado y con quién?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+
+  _abierto: "",
+  _busca: "",
+  _estado: "",
+
+  pintar: function (M, D) {
+    var B = (D || {}).bitacora || {};
+    if (!B.hay) {
+      return '<div class="d-lienzo"><div class="tarjeta">' +
+        '<span class="overline">Cotizaciones</span>' +
+        '<p class="mas">' + esc(B.motivo || "sin cotizaciones publicadas") +
+        ' · Obra</p></div></div>';
+    }
+    var bus = (this._busca || "").toUpperCase();
+    var est = this._estado, abierto = this._abierto;
+    var cols = B.cols_cotizacion || [];
+    var iEstado = cols.indexOf("Estado"), iMonto = cols.indexOf("Monto S/");
+    var iPartida = cols.indexOf("Partida");
+
+    var visto = function (p) {
+      return (p.cotizaciones || []).filter(function (f) {
+        if (est && String(f[iEstado]) !== est) return false;
+        if (!bus) return true;
+        return String(p.proyecto).toUpperCase().indexOf(bus) >= 0 ||
+               f.some(function (v) {
+                 return String(v).toUpperCase().indexOf(bus) >= 0; });
+      });
+    };
+
+    var estados = {};
+    (B.proyectos || []).forEach(function (p) {
+      (p.cotizaciones || []).forEach(function (f) { estados[f[iEstado]] = 1; });
+    });
+    estados = Object.keys(estados).sort();
+
+    var nTot = 0, mTot = 0, obras = 0;
+    (B.proyectos || []).forEach(function (p) {
+      var fs = visto(p);
+      if (fs.length) obras++;
+      nTot += fs.length;
+      fs.forEach(function (f) { mTot += (f[iMonto] || 0); });
+    });
+
+    var h = '<div class="d-lienzo">';
+    h += '<div class="st-barra">' +
+      '<div class="bi-tot"><b>' + ent(nTot) + '</b> cotizaciones' +
+      '<span class="st-sep">' + soles(mTot) + ' · ' + ent(obras) + ' obras</span></div>' +
+      '<label class="st-campo">Buscar<input id="cz-busca" type="search" ' +
+      'placeholder="obra, partida, proveedor…" value="' + esc(this._busca || "") +
+      '"></label>' +
+      '<div class="st-tipos">' +
+        '<button type="button" class="st-pill' + (est ? '' : ' st-pill-on') +
+        '" data-est="">Todos</button>' +
+        estados.map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (est === x ? ' st-pill-on' : '') + '" data-est="' + esc(x) + '">' +
+            esc(x) + '</button>';
+        }).join("") +
+      '</div></div>';
+
+    h += '<div class="st-grid">';
+    var conAlgo = 0;
+    (B.proyectos || []).forEach(function (p, i) {
+      var fs = visto(p);
+      if (!fs.length) return;
+      conAlgo++;
+      var monto = fs.reduce(function (a, f) { return a + (f[iMonto] || 0); }, 0);
+      var id = "z" + i, esta = (abierto === id);
+      h += '<div class="st-tarj' + (esta ? ' st-on' : '') + '" data-obra="' + id + '" ' +
+        'tabindex="0" role="button" aria-expanded="' + (esta ? 'true' : 'false') + '">' +
+        '<div class="st-nom">' + esc(p.proyecto) +
+          '<span class="st-tipo">' + esc(p.tipo || "") + '</span></div>' +
+        '<div class="st-libres"><b>' + ent(fs.length) + '</b> cotizaciones</div>' +
+        '<div class="st-rango">' + soles(monto) + '</div>' +
+        '<div class="st-ver">' + (esta ? 'Cerrar' : 'Ver las cotizaciones') + '</div>' +
+        '</div>';
+    });
+    h += '</div>';
+
+    var agruparPorPartida = function (fs) {
+      var orden = [], grupos = {};
+      fs.forEach(function (f) {
+        var k = iPartida >= 0 ? String(f[iPartida] || "—") : "—";
+        if (!grupos[k]) { grupos[k] = []; orden.push(k); }
+        grupos[k].push(f);
+      });
+      var conVarias = [], resto = [];
+      orden.forEach(function (k) {
+        if (k !== "—" && grupos[k].length > 1) conVarias.push([k, grupos[k]]);
+        else resto = resto.concat(grupos[k]);
+      });
+      return {conVarias: conVarias, resto: resto};
+    };
+
+    var elegido = null;
+    (B.proyectos || []).forEach(function (p, i) {
+      if (abierto === "z" + i) elegido = p; });
+    if (elegido) {
+      var fs = visto(elegido);
+      var monto = fs.reduce(function (a, f) { return a + (f[iMonto] || 0); }, 0);
+      var grupo = agruparPorPartida(fs);
+      h += '<div class="tarjeta st-lista">' +
+        '<button type="button" class="st-cerrar" aria-label="Cerrar">✕</button>' +
+        '<span class="overline">' + esc(elegido.proyecto) +
+        '<span class="st-cuenta">' + ent(fs.length) + ' cotizaciones · ' +
+        soles(monto) + '</span></span>';
+      if (!fs.length) {
+        h += '<p class="mas">Esta obra no tiene cotizaciones con ese filtro</p>';
+      } else {
+        grupo.conVarias.forEach(function (par) {
+          h += '<p class="mas"><b>' + esc(par[0]) + '</b> · ' + ent(par[1].length) +
+            ' cotizaciones para comparar y elegir</p>' + tablaObra(cols, par[1], "");
+        });
+        if (grupo.resto.length) {
+          if (grupo.conVarias.length) h += '<p class="mas">Otras cotizaciones</p>';
+          h += tablaObra(cols, grupo.resto, "");
+        }
+      }
+      h += '</div>';
+    }
+    if (!conAlgo) {
+      h += '<div class="tarjeta"><p class="mas">Ninguna cotización con ese filtro</p></div>';
+    }
+    if (B.cotizaciones_fuera) {
+      h += '<p class="mas">De obras sin bitácora · ' + ent(B.cotizaciones_fuera) +
+        ' cotizaciones · Obra</p>';
+    }
+    return h + '</div>';
+  },
+
+  conectar: function () { conectarObra(this, "cz-busca"); }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+{
+  "Tiempo de primera respuesta": {
+    "escala": "igual",
+    "meta": 60,
+    "mejor": "menor",
+    "ambar": 120,
+    "unidad": "min",
+    "de": "tabla del jefe de comercial · por asesor"
+  },
+  "% Visitas realizadas": {
+    "escala": "igual",
+    "meta": 80,
+    "mejor": "mayor",
+    "ambar": 64,
+    "unidad": "%",
+    "de": "tabla del jefe de comercial · por asesor"
+  },
+  "% Lead → Visita": {
+    "escala": "igual",
+    "meta": 15,
+    "mejor": "mayor",
+    "ambar": 12,
+    "unidad": "%",
+    "de": "tabla del jefe de comercial · «visitas agendadas >=15% de leads»"
+  },
+  "Ventas cerradas": {
+    "escala": "por_asesor",
+    "meta": 5,
+    "mejor": "mayor",
+    "ambar": 4,
+    "unidad": "n",
+    "de": "tabla del jefe de comercial · por asesor"
+  },
+  "Leads calificados": {
+    "escala": "igual",
+    "meta": 50,
+    "mejor": "mayor",
+    "ambar": 40,
+    "unidad": "%",
+    "de": "tabla del jefe de comercial · sin fuente todavia"
+  }
+}

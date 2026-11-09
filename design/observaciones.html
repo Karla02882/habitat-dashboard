@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Observaciones</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "observaciones",
+  nombre: "Observaciones",
+  titulo: "Observaciones abiertas",
+  pregunta: "¿Qué no cuadra todavía, y quién lo responde?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+
+  ventanas: {},
+
+  pintar: function (M, D) {
+    var O = (D || {}).observaciones || [];
+    var B = ((D || {}).control_cuentas || {}).banco_al_dia || {};
+    var h = '<div class="d-lienzo">';
+
+    /* La tarjeta: cuántas hay, y de cuándo es cada lado. */
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-kpi-saldo">' +
+      '<div class="d-cab"><span class="d-chip">◈</span>' +
+      '<span class="d-preg">¿Cuántas cosas no cuadran?</span></div>' +
+      '<div class="d-cifra">' + ent(O.length) + '</div>' +
+      '<div class="d-exacta">' + (O.length === 1 ? 'observación abierta'
+                                                 : 'observaciones abiertas') +
+      (B.fecha ? ' · banco al ' + esc(B.fecha) : '') + '</div>' +
+      '<div class="d-pie"><span class="d-tag">se recalculan solas</span>' +
+      'ninguna está escrita a mano</div></div></div>';
+
+    if (!O.length) {
+      h += '<div class="tarjeta"><span class="overline">Observaciones</span>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Observación</th><th class="num">Cifra</th></tr></thead><tbody>' +
+        '<tr><td class="obra">No existe</td><td class="num">No existe</td></tr>' +
+        '</tbody></table></div></div>';
+      return h + this._rutina() + '</div>';
+    }
+
+    h += '<div class="tarjeta"><span class="overline">Lo que no cuadra</span>' +
+      '<div class="envoltura-tabla"><table class="datos col-fija"><thead><tr>' +
+      '<th>#</th><th>Observación</th><th class="num">Cifra</th>' +
+      '<th>Responde</th></tr></thead><tbody>';
+    O.forEach(function (o) {
+      h += '<tr class="fila-obra abrible" data-abre="obs-' + o.n + '" ' +
+        'aria-expanded="false" tabindex="0" role="button">' +
+        '<td class="obra">' + ent(o.n) + '</td>' +
+        '<td class="obra"><span class="ob-nom">' + esc(o.que) + '</span></td>' +
+        '<td class="num">' + esc(o.cifra) + '</td>' +
+        '<td>' + esc(o.area) + '</td></tr>';
+    });
+    h += '</tbody></table></div>' +
+      O.map(function (o) {
+        return '<div class="detalle" id="det-obs-' + o.n + '"></div>';
+      }).join('') + '</div>';
+
+    return h + this._rutina() + '</div>';
+  },
+
+  _rutina: function () {
+    var pasos = [
+      ["1", "Pedir a Lisbeth la captura del banco de las 12 cuentas",
+       "Administración", "hoy llegan 8; faltan BCP Yean y BBVA Habitat León"],
+      ["2", "Pedir el arqueo de la caja chica",
+       "Administración", "el efectivo no tiene banco que lo compruebe"],
+      ["3", "Cargar esas cifras y mirar la columna «Diferencia»",
+       "Administración", "cada cuenta contra su banco, el mismo día"],
+      ["4", "Revisar que las observaciones de arriba hayan bajado",
+       "Gerencia", "la que Habitat corrige desaparece sola"],
+      ["5", "Mirar si AXION ya tiene cargado hasta el día de la captura",
+       "Administración", "si AXION va atrasado, la diferencia no es un error"],
+      ["6", "Preguntar si ya llenan la tabla SaldoInicial de AXION",
+       "Administración", "si la llenan, la columna del banco se actualiza sola por la API"]
+    ];
+    var h = '<div class="tarjeta"><span class="overline">La revisión de cada sábado</span>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>#</th><th>Qué se hace</th><th>A quién</th><th>Por qué</th>' +
+      '</tr></thead><tbody>';
+    pasos.forEach(function (p) {
+      h += '<tr><td class="obra">' + esc(p[0]) + '</td>' +
+        '<td class="obra"><span class="ob-nom">' + esc(p[1]) + '</span></td>' +
+        '<td>' + esc(p[2]) + '</td><td>' + esc(p[3]) + '</td></tr>';
+    });
+    return h + '</tbody></table></div></div>';
+  },
+
+  detalle: function (id, el) {
+    var t = '<button class="cerrar">Cerrar</button>';
+    var O = (D || {}).observaciones || [];
+    if (id.indexOf("obs-") !== 0) return "";
+    var o = O.filter(function (x) { return String(x.n) === id.slice(4); })[0];
+    if (!o) return t + '<h3>Observación</h3>';
+    var h = t + '<h3>' + esc(o.que) + '</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Dato</th><th>Valor</th></tr></thead><tbody>';
+    var fila = function (rot, val) {
+      return '<tr><td class="obra">' + esc(rot) + '</td><td>' +
+        esc(val || "No existe") + '</td></tr>';
+    };
+    h += fila("Cifra", o.cifra);
+    h += fila("Dónde", o.detalle);
+    if (o.quien) h += fila("Qué significa", o.quien);
+    h += fila("Responde", o.area);
+    return h + '</tbody></table></div>';
+  }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+{
+  "aperturas": {
+    "2026-08-01": {
+      "_fuente": "Libro Mayor Caja Huancayo · Excel de Administracion (30-ago-2026). Es la apertura de agosto que tenia AXION/Administracion, no un extracto del banco.",
+      "cuentas": {
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": 191957.19,
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": 226138.85,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": 16439.85,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": 296821.6
+      },
+      "fuente": {
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": "axion",
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": "axion",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": "axion",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": "axion"
+      }
+    },
+    "2026-09-01": {
+      "_fuente": "Lisbeth por WhatsApp, 01-set-2026. 12:11: las 4 CMAC, «esos son mis saldos hasta ayer 31 de agosto en las cuentas de Caja Huancayo» (descargados del banco). 17:36: BCP y BBVA, «eso sale segun Axion, al corte de agosto, pero no estoy segura, tendria que ver con los estados de cuenta y estos llegan el 5». Las 5 de AXION se recalcularon por camino propio sobre el Registro de Movimientos y dieron 0.00 de diferencia, 5 de 5.",
+      "cuentas": {
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": 353028.81,
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": 58245.39,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": 307425.87,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": 18483.19,
+        "BCP - CORPORACION HABITAT SAC": 24953.72,
+        "BCP - CONSTRUCTORA VELASCO LEON SAC": 50020.42,
+        "BCP - YEAN WILLIAM VELASCO LEON": 4362.45,
+        "BBVA - HABITAT BIENES RAICES EIRL": 107697.2,
+        "BBVA - CORPORACION HABITAT SAC": 211533.66
+      },
+      "fuente": {
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": "banco",
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": "banco",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": "banco",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": "banco",
+        "BCP - CORPORACION HABITAT SAC": "axion",
+        "BCP - CONSTRUCTORA VELASCO LEON SAC": "axion",
+        "BCP - YEAN WILLIAM VELASCO LEON": "axion",
+        "BBVA - HABITAT BIENES RAICES EIRL": "axion",
+        "BBVA - CORPORACION HABITAT SAC": "axion"
+      }
+    }
+  },
+  "fecha": "2026-09-01",
+  "fuente": "Lisbeth (Administracion) · 01-set-2026 · 4 del banco + 5 segun AXION",
+  "cuentas": {
+    "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": 353028.81,
+    "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": 58245.39,
+    "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": 307425.87,
+    "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": 18483.19,
+    "BCP - CORPORACION HABITAT SAC": 24953.72,
+    "BCP - CONSTRUCTORA VELASCO LEON SAC": 50020.42,
+    "BCP - YEAN WILLIAM VELASCO LEON": 4362.45,
+    "BBVA - HABITAT BIENES RAICES EIRL": 107697.2,
+    "BBVA - CORPORACION HABITAT SAC": 211533.66
+  },
+  "al_dia": {
+    "2026-10-02": {
+      "_fuente": "Lisbeth (Administracion) por WhatsApp, viernes 2-oct-2026, 6:07 a 6:16 PM: nueve capturas de banca por internet (BCP, BBVA y Caja Huancayo). Son 9 de las 12 cuentas del cockpit.",
+      "_faltan": "De las 12 cuentas del cuadro no mando: BCP - YEAN WILLIAM VELASCO LEON (no tiene captura), mas EFECTIVO —que no tiene banco que lo compruebe, su unica prueba es un arqueo— y SIN BANCO, que no es una cuenta sino los movimientos que nadie asigno.",
+      "cuentas": {
+        "BCP - CORPORACION HABITAT SAC": 42718.01,
+        "BCP - CONSTRUCTORA VELASCO LEON SAC": 21578.46,
+        "BBVA - HABITAT BIENES RAICES EIRL": 164856.13,
+        "BBVA - CORPORACION HABITAT SAC": 182454.88,
+        "BBVA - HABITAT LEÓN SAC": 50837.6,
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": 218153.08,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": 103788.1,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": 20425.38,
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": 1501.47
+      },
+      "fuente": {
+        "BCP - CORPORACION HABITAT SAC": "banco",
+        "BCP - CONSTRUCTORA VELASCO LEON SAC": "banco",
+        "BBVA - HABITAT BIENES RAICES EIRL": "banco",
+        "BBVA - CORPORACION HABITAT SAC": "banco",
+        "BBVA - HABITAT LEÓN SAC": "banco",
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": "banco",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": "banco",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": "banco",
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": "banco"
+      }
+    },
+    "2026-09-19": {
+      "_fuente": "Lisbeth (Administracion) por WhatsApp, 19-set-2026 ~13:00: siete capturas de banca por internet mas el saldo de BCP Corporacion. Son 8 de las 12 cuentas del cockpit.",
+      "_faltan": "De las 12 cuentas del cuadro no mando: BCP - YEAN WILLIAM VELASCO LEON y BBVA - HABITAT LEON SAC (dos bancos).",
+      "cuentas": {
+        "BCP - CORPORACION HABITAT SAC": 1960.32,
+        "BCP - CONSTRUCTORA VELASCO LEON SAC": 31673.41,
+        "BBVA - HABITAT BIENES RAICES EIRL": 178692.78,
+        "BBVA - CORPORACION HABITAT SAC": 211533.66,
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": 224042.69,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": 184292.53,
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": 18483.19,
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": 47368.48
+      },
+      "fuente": {
+        "BCP - CONSTRUCTORA VELASCO LEON SAC": "banco",
+        "BBVA - HABITAT BIENES RAICES EIRL": "banco",
+        "BBVA - CORPORACION HABITAT SAC": "banco",
+        "CMAC HUANCAYO - HABITAT BIENES RAICES EIRL": "banco",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - GLORIA": "banco",
+        "CMAC HUANCAYO - CORPORACION HABITAT SAC - YEAN": "banco",
+        "CMAC HUANCAYO - ESCALAR Y HABITAT GRUPO INMOBILIARIO SAC": "banco",
+        "BCP - CORPORACION HABITAT SAC": "sin declarar"
+      }
+    }
+  }
+}

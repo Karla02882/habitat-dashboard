@@ -1,0 +1,96 @@
+
+:root {
+
+  --navy-50:  #eef1fb;
+  --navy-100: #dde3f5;
+  --navy-200: #b9c5e9;
+  --navy-300: #8b9edb;
+  --navy-400: #5570c2;
+  --navy-500: #2e4ca6;
+  --navy-600: #1f3a8f;
+  --navy-700: #163180; /* brand base */
+  --navy-800: #122763;
+  --navy-900: #0d1b45;
+  --navy-950: #081029;
+
+
+  --yellow-300: #fee98a;
+  --yellow-400: #fde04e;
+  --yellow-500: #fcd925; /* brand accent */
+  --yellow-600: #eac40a;
+  --yellow-700: #bd9c05;
+  /* Yellow-green secondary accent */
+  --lime-500: #f3ea13; /* brand accent alt */
+  --lime-600: #d8cf07;
+
+
+  --white:      #ffffff;
+  --neutral-50:  #f6f7fb;
+  --neutral-100: #edeff5;
+  --neutral-200: #dfe3ec;
+  --neutral-300: #c6cdda;
+  --neutral-400: #99a2b7;
+  --neutral-500: #6b7488;
+  --neutral-600: #4a5266;
+  --neutral-700: #333a4a;
+  --neutral-800: #1f2433;
+  --neutral-900: #10131c;
+  --black:      #000000;
+
+
+  --green-500: #16a571; --green-600: #0f8a5f; --green-50: #e5f6ef;
+  --red-500:   #e23b32; --red-600:   #c62a22; --red-50:  #fcebea;
+  --amber-500: #f5a623; --amber-50:  #fdf0d9;
+
+
+
+  --color-brand:        var(--navy-700);
+  --color-brand-strong: var(--navy-800);
+  --color-brand-deep:   var(--navy-900);
+  --color-brand-soft:   var(--navy-50);
+  --color-brand-muted:  var(--navy-100);
+  --color-accent:       var(--yellow-500);
+  --color-accent-strong:var(--yellow-600);
+  --color-accent-alt:   var(--lime-500);
+
+
+  --text-strong:   var(--navy-900);
+  --text-body:     var(--neutral-700);
+  --text-muted:    var(--neutral-500);
+  --text-subtle:   var(--neutral-400);
+  --text-on-brand: var(--white);
+  --text-on-accent:var(--navy-900);
+  --text-link:     var(--navy-600);
+  --text-link-hover: var(--navy-800);
+
+  /* Surfaces */
+  --surface-app:     var(--neutral-50);
+  --surface-card:    var(--white);
+  --surface-raised:  var(--white);
+  --surface-sunken:  var(--neutral-100);
+  --surface-brand:   var(--navy-700);
+  --surface-brand-deep: var(--navy-900);
+  --surface-accent:  var(--yellow-500);
+  --surface-inverse: var(--navy-900);
+
+  /* Borders & lines */
+  --border-subtle:  var(--neutral-200);
+  --border-default: var(--neutral-300);
+  --border-strong:  var(--neutral-400);
+  --border-brand:   var(--navy-700);
+  --divider:        var(--neutral-200);
+
+  /* Status (fg / bg pairs) */
+  --success:     var(--green-600);  --success-bg: var(--green-50);
+  --danger:      var(--red-600);    --danger-bg:  var(--red-50);
+  --warning:     var(--amber-500);  --warning-bg: var(--amber-50);
+  --info:        var(--navy-600);   --info-bg:    var(--navy-50);
+  /* Directional deltas for KPIs */
+  --delta-up:    var(--green-600);
+  --delta-down:  var(--red-600);
+  --delta-flat:  var(--neutral-500);
+
+
+  --focus-ring: 0 0 0 3px rgba(46, 76, 166, .38);
+  --focus-ring-accent: 0 0 0 3px rgba(252, 217, 37, .55);
+}

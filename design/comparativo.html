@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparativo · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "comparativo",
+  nombre: "Comparativo",
+  pregunta: "¿Coinciden ContaSis y AXION?",
+  fuentes: ["CONTASIS", "AXION"],
+  sinRazonObra: true,
+  /* el mes se elige adentro, un botón por cada mes con libro caja */
+  sinPeriodo: true,
+
+
+  _emp: "20605163557",
+  _mesSel: null,
+  _M: null, _D: null,
+  _EMPS: [
+    ["20608888188", "CONSTRUCTORA VELASCO LEON S.A.C."],
+    ["20607720224", "CORPORACION HABITAT S.A.C."],
+    ["20611216565", "ESCALAR Y HABITAT GRUPO INMOBILIARIO S.A.C."],
+    ["20605163557", "HABITAT BIENES RAICES E.I.R.L."]
+  ],
+  _MESN: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+          "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"],
+  _VENTA: {"Venta al detalle": 1, "Venta Mayoreo": 1},
+  _FILAS: [
+    ["entro", "Entró"],
+    ["cobros", "Cobros de clientes"],
+    ["salio", "Salió"]
+  ],
+
+  _mesTxt: function (k) {
+    var m = /^(\d{4})-(\d{2})$/.exec(String(k || ""));
+    return m ? this._MESN[Number(m[2]) - 1] + " " + m[1] : String(k || "");
+  },
+  _pad: function (n) { return (n < 10 ? "0" : "") + n; },
+  _E: function () {
+    return ((this._D || {}).contasis_mensual || {}).empresas || {};
+  },
+
+  _ruc: function (nombre) {
+    var s = String(nombre || "").toUpperCase();
+    if (s.indexOf("ESCALAR") >= 0) return "20611216565";
+    if (s.indexOf("CORPORACION HABITAT") >= 0) return "20607720224";
+    if (s.indexOf("CONSTRUC") >= 0 && s.indexOf("VELASCO LEON") >= 0) return "20608888188";
+    if (s.indexOf("HABITAT BIENES") >= 0) return "20605163557";
+    return "";
+  },
+
+  /* los meses que se pueden comparar: los que tienen libro caja */
+  _meses: function () {
+    var E = this._E(), ks = {};
+    Object.keys(E).forEach(function (r) {
+      Object.keys(E[r].caja || {}).forEach(function (k) { ks[k] = 1; });
+    });
+    return Object.keys(ks).sort();
+  },
+  _mes: function () {
+    var ks = this._meses();
+    if (!ks.length) return null;
+    return ks.indexOf(this._mesSel) >= 0 ? this._mesSel : ks[ks.length - 1];
+  },
+
+  _filasCS: function (ruc, mes) {
+    var m = ((this._E()[ruc] || {}).caja || {})[mes];
+    if (!m || !(m.diario || []).length) return null;
+    var cols = (this._D.contasis_mensual || {}).diario_cols || [], ix = {};
+    cols.forEach(function (c, i) { ix[c] = i; });
+    var nom = {};
+    (m.cuentas || []).forEach(function (c) { nom[c.cuenta] = c.descripcion; });
+    return m.diario.map(function (f) {
+      var cta = String(f[ix.cuenta] || "");
+      return {fecha: f[ix.fecha], cuenta: cta, nombre: nom[cta] || "",
+              empresa: f[ix.empresa] || "", numero: f[ix.numero] || "",
+              debe: f[ix.debe] || 0, haber: f[ix.haber] || 0};
+    });
+  },
+  _filasAX: function (ruc, mes) {
+    var L = (this._D.libro || {}).filas || {}, self = this;
+    var C = L.cuenta || [], MV = L.mov || [];
+    var out = [];
+    (L.f || []).forEach(function (f) {
+      if (String(f[0]).slice(0, 7) !== mes) return;
+      if (self._ruc(C[f[6]]) !== ruc) return;
+      out.push({fecha: f[0], mov: MV[f[1]] || "", concepto: f[3], monto: f[4],
+                cuenta: C[f[6]] || "", clase: f[7]});
+    });
+    return this._marcarTraspasos(out);
+  },
+
+  _MARCA_TRASPASO: ["SE DEPOSIT", "SE RETIR", "RETIRO DE", "TRASPAS"],
+  _norm: function (t) {
+    t = String(t || "").toUpperCase();
+    return t.replace(/[^A-Z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  },
+  _seReconocen: function (a, b) {
+    var x = this._norm(a), y = this._norm(b), n = 0;
+    while (n < x.length && n < y.length && x.charAt(n) === y.charAt(n)) n++;
+    if (n >= 12) return true;
+    var marcado = function (t) {
+      return this._MARCA_TRASPASO.some(function (m) { return t.indexOf(m) >= 0; });
+    }.bind(this);
+    return marcado(x) && marcado(y);
+  },
+  _marcarTraspasos: function (ax) {
+    var pres = [], self = this;
+    ax.forEach(function (r, i) {
+      if (r.clase === "presupuesto" &&
+          String(r.concepto || "").toUpperCase().indexOf("SALDO") !== 0) pres.push(i);
+    });
+    if (!pres.length) return ax;
+    var usado = {}, gastos = [];
+    ax.forEach(function (r, i) { if (r.clase === "gasto") gastos.push(i); });
+    gastos.sort(function (p, q) { return ax[q].monto - ax[p].monto; });
+    gastos.forEach(function (i) {
+      var g = ax[i];
+      for (var k = 0; k < pres.length; k++) {
+        var j = pres[k], t = ax[j];
+        if (usado[j]) continue;
+        if (Math.round(t.monto * 100) !== Math.round(g.monto * 100)) continue;
+        if (String(t.fecha).slice(0, 10) !== String(g.fecha).slice(0, 10)) continue;
+        if (!self._seReconocen(g.concepto, t.concepto)) continue;
+        usado[j] = 1; g.traspaso = t; t.interno = true; return;
+      }
+    });
+    return ax;
+  },
+
+  _esEntrada: function (r) {
+    if (r.clase === "venta") return true;
+    return r.clase === "presupuesto" && !r.interno &&
+      String(r.concepto || "").toUpperCase().indexOf("SALDO") !== 0;
+  },
+
+  _traspasos: function (ruc, mes) {
+    return this._filasAX(ruc, mes).filter(function (r) { return r.traspaso; });
+  },
+
+  _recibido: function (ruc, mes) {
+    return this._filasAX(ruc, mes).filter(function (r) {
+      return r.clase === "presupuesto" && !r.interno &&
+        String(r.concepto || "").toUpperCase().indexOf("SALDO") !== 0;
+    });
+  },
+  _cuentasAX: function (ruc) {
+    var self = this;
+    return (((this._D.libro || {}).filas || {}).cuenta || []).filter(function (c) {
+      return self._ruc(c) === ruc; });
+  },
+
+  /* Las filas de cada lado para un renglón del cuadro. */
+  _lados: function (ruc, mes, que) {
+    var cs = this._filasCS(ruc, mes), ax = this._filasAX(ruc, mes), self = this;
+    var propia = function (r) { return r.cuenta.indexOf("10") !== 0; };
+    var a = (cs || []).filter(function (r) {
+      if (!propia(r)) return false;
+      if (que === "salio") return r.haber > 0;
+      if (que === "cobros") return r.debe > 0 && /^1[23]/.test(r.cuenta);
+      return r.debe > 0;
+    }).map(function (r) {
+      return {fecha: r.fecha, monto: que === "salio" ? r.haber : r.debe, r: r}; });
+    var b = ax.filter(function (r) {
+      if (que === "salio") return r.clase === "gasto" && !r.traspaso;
+      if (que === "cobros") return r.clase === "venta" && self._VENTA[r.mov];
+      return self._esEntrada(r);
+    }).map(function (r) { return {fecha: r.fecha, monto: r.monto, r: r}; });
+    return {cs: cs ? a : null, ax: b};
+  },
+
+  _totales: function (ruc, mes) {
+    var m = ((this._E()[ruc] || {}).caja || {})[mes];
+    var t = {cs: {entro: 0, salio: 0, cobros: 0}, ax: {entro: 0, salio: 0, cobros: 0}};
+    var self = this;
+    (m ? m.cuentas || [] : []).forEach(function (c) {
+      var cta = String(c.cuenta || "");
+      if (cta.indexOf("10") === 0) return;
+      t.cs.entro += c.debe; t.cs.salio += c.haber;
+      if (/^1[23]/.test(cta)) t.cs.cobros += c.debe;
+    });
+    this._filasAX(ruc, mes).forEach(function (r) {
+      if (self._esEntrada(r)) {
+        t.ax.entro += r.monto;
+        if (r.clase === "venta" && self._VENTA[r.mov]) t.ax.cobros += r.monto;
+      } else if (r.clase === "gasto" && !r.traspaso) t.ax.salio += r.monto;
+    });
+    return t;
+  },
+
+  _emparejar: function (a, b) {
+    var dia = function (f) {
+      var t = Date.parse(String(f || "") + "T00:00:00");
+      return isNaN(t) ? 0 : t / 86400000;
+    };
+    var usado = {}, porMonto = {}, soloA = [], n = 0, m = 0;
+    b.forEach(function (x, j) {
+      var k = Math.round(x.monto * 100);
+      (porMonto[k] = porMonto[k] || []).push(j);
+    });
+    a.slice().sort(function (p, q) { return q.monto - p.monto; }).forEach(function (x) {
+      var cands = (porMonto[Math.round(x.monto * 100)] || []).filter(function (j) {
+        return !usado[j]; });
+      if (!cands.length) { soloA.push(x); return; }
+      var mejor = cands[0], dist = Infinity;
+      cands.forEach(function (j) {
+        var d = Math.abs(dia(b[j].fecha) - dia(x.fecha));
+        if (d < dist) { dist = d; mejor = j; }
+      });
+      usado[mejor] = 1; n++; m += x.monto;
+    });
+    var soloB = b.filter(function (x, j) { return !usado[j]; });
+    var porFecha = function (p, q) { return String(p.fecha).localeCompare(String(q.fecha)); };
+    return {soloA: soloA.sort(porFecha), soloB: soloB.sort(porFecha), n: n, monto: m};
+  },
+
+  _dif: function (a, b) {
+    var d = a - b;
+    return '<td class="num"' + (Math.abs(d) >= 0.005 ? ' style="color:var(--rojo)"' : '') + '>' +
+      (Math.abs(d) >= 0.005 ? soles(d) : 'igual') + '</td>';
+  },
+
+  pintar: function (M, D) {
+    this._M = M; this._D = D;
+    return '<div id="cp-caja">' + this._cuerpo() + '</div>';
+  },
+
+  _cuerpo: function () {
+    var self = this, E = this._E(), mes = this._mes();
+    if (!mes) return '';
+    var emps = this._EMPS.filter(function (e) { return ((E[e[0]] || {}).caja || {})[mes]; });
+    if (!emps.length) return '';
+    if (!emps.some(function (e) { return e[0] === self._emp; })) this._emp = emps[0][0];
+    var ruc = this._emp, nombre = emps.filter(function (e) { return e[0] === ruc; })[0][1];
+    var mt = esc(this._mesTxt(mes));
+
+    var h = '<div class="d-lienzo"><div class="cs-barra">' +
+      '<label class="cs-f">Mes<select id="cp-mes">' +
+      this._meses().map(function (k) {
+        return '<option value="' + k + '"' + (k === mes ? ' selected' : '') + '>' +
+          esc(self._mesTxt(k)) + '</option>';
+      }).join('') + '</select></label>' +
+      '<label class="cs-f">Empresa<select id="cp-emp">' +
+      emps.map(function (e) {
+        return '<option value="' + e[0] + '"' + (ruc === e[0] ? ' selected' : '') + '>' +
+          esc(e[1]) + '</option>';
+      }).join('') + '</select></label>' +
+      '<span class="cs-dato">' + esc(nombre) + ' · ' + mt + '</span></div>';
+
+    /* 1 · la empresa elegida: caja y bancos */
+    var T = this._totales(ruc, mes);
+    var conDetalle = !!this._filasCS(ruc, mes);
+    h += '<div class="d-carta"><h3 class="d-tit">Caja y bancos · ' + esc(nombre) + ' · ' + mt +
+      '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr><th>Concepto</th>' +
+      '<th class="num">ContaSis</th><th class="num">AXION</th><th class="num">Diferencia</th>' +
+      '</tr></thead><tbody>';
+    var REC = this._recibido(ruc, mes);
+    var mREC = REC.reduce(function (a, x) { return a + x.monto; }, 0);
+    this._FILAS.forEach(function (f) {
+      var a = T.cs[f[0]], b = T.ax[f[0]];
+      var abre = conDetalle && Math.abs(a - b) >= 0.005;
+      var sub = (f[0] === "entro" && REC.length)
+        ? '<span class="ob-sub"> · incluye ' + soles(mREC) + ' que llegó de otra cuenta ' +
+          'del grupo, como lo anota el contador</span>' : '';
+      h += '<tr' + (abre ? ' class="abrible" data-abre="cp-' + f[0] +
+        '" aria-expanded="false" tabindex="0" role="button"' : '') + '><td class="obra">' +
+        esc(f[1]) + sub + '</td><td class="num">' + soles(a) + '</td><td class="num">' + soles(b) +
+        '</td>' + self._dif(a, b) + '</tr>';
+    });
+    var TR = this._traspasos(ruc, mes);
+    if (TR.length) {
+      var mismaCta = TR.filter(function (r) { return r.traspaso.cuenta === r.cuenta; }).length;
+      h += '<tr class="abrible" data-abre="cp-tras" aria-expanded="false" tabindex="0" ' +
+        'role="button"><td class="obra">Salida con su contrapartida el mismo día' +
+        '<span class="ob-sub"> · AXION la anota dos veces · en la hoja Caja figura ' +
+        'dentro de Salió' + (mismaCta ? ' · ' + ent(mismaCta) +
+        (mismaCta === 1 ? ' en la misma cuenta' : ' en su misma cuenta') : '') +
+        '</span></td>' +
+        '<td class="num gris">—</td><td class="num gris">' +
+        soles(TR.reduce(function (a, x) { return a + x.monto; }, 0)) +
+        '</td><td class="num gris">' + ent(TR.length) +
+        (TR.length === 1 ? ' fila' : ' filas') + '</td></tr>';
+    }
+    var na = T.cs.entro - T.cs.salio, nb = T.ax.entro - T.ax.salio;
+    h += '<tr class="total"><td class="obra">Neto del mes</td><td class="num">' + soles(na) +
+      '</td><td class="num">' + soles(nb) + '</td>' + this._dif(na, nb) + '</tr>' +
+      '</tbody></table></div><div class="d-pie">AXION · ' +
+      esc(this._cuentasAX(ruc).join(' · ')) + '</div></div>';
+    this._FILAS.forEach(function (f) {
+      h += '<div class="detalle" id="det-cp-' + f[0] + '"></div>'; });
+    h += '<div class="detalle" id="det-cp-tras"></div>';
+
+    /* 2 · las empresas con libro caja ese mes */
+    h += '<div class="d-carta"><h3 class="d-tit">Caja y bancos por empresa · ' + mt +
+      '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr><th>Empresa</th>' +
+      '<th class="num">Entró · ContaSis</th><th class="num">Entró · AXION</th>' +
+      '<th class="num">Diferencia</th><th class="num">Salió · ContaSis</th>' +
+      '<th class="num">Salió · AXION</th><th class="num">Diferencia</th></tr></thead><tbody>';
+    var g = {ce: 0, ae: 0, cs: 0, as: 0};
+    emps.forEach(function (e) {
+      var t = self._totales(e[0], mes);
+      g.ce += t.cs.entro; g.ae += t.ax.entro; g.cs += t.cs.salio; g.as += t.ax.salio;
+      h += '<tr' + (e[0] === ruc ? ' class="cs-sel"' : '') + '><td class="obra">' + esc(e[1]) +
+        '</td><td class="num">' + soles(t.cs.entro) + '</td><td class="num">' + soles(t.ax.entro) +
+        '</td>' + self._dif(t.cs.entro, t.ax.entro) + '<td class="num">' + soles(t.cs.salio) +
+        '</td><td class="num">' + soles(t.ax.salio) + '</td>' + self._dif(t.cs.salio, t.ax.salio) +
+        '</tr>';
+    });
+    h += '<tr class="total"><td class="obra">TOTAL</td><td class="num">' + soles(g.ce) +
+      '</td><td class="num">' + soles(g.ae) + '</td>' + this._dif(g.ce, g.ae) +
+      '<td class="num">' + soles(g.cs) + '</td><td class="num">' + soles(g.as) + '</td>' +
+      this._dif(g.cs, g.as) + '</tr></tbody></table></div></div>';
+
+    return h + this._ventasCompras(emps, mes) + '</div>';
+  },
+
+  /* 3 · ventas y compras, una al lado de la otra */
+  _ventasCompras: function (emps, mes) {
+    var self = this, E = this._E(), D = this._D;
+    var anio = mes.slice(0, 4);
+    var cubre = function (rg) {
+      return rg && rg.periodo && rg.periodo.slice(0, 4) === anio && rg.periodo >= mes;
+    };
+    var eo = D.empresa_de_obra || {};
+    var axV = {}, axC = {}, hayOC = false;
+    (((D.operacion || {}).ventas) || []).forEach(function (x) {
+      if (x.mes !== mes) return;
+      var r = self._ruc(eo[x.obra]);
+      var v = axV[r] = axV[r] || {n: 0, s: 0};
+      v.n += x.n; v.s += x.monto;
+    });
+    (D.ordenes_compra || []).forEach(function (x) {
+      if (String(x.fecha || "").slice(0, 7) !== mes) return;
+      hayOC = true;
+      var r = self._ruc(eo[x.obra]);
+      var v = axC[r] = axC[r] || {n: 0, s: 0};
+      v.n += 1; v.s += Number(x.total) || 0;
+    });
+    /* una tabla por concepto, cada fuente con su cantidad y su monto */
+    var tabla = function (titulo, tipo, ax, cols) {
+      var filas = emps.filter(function (e) {
+        return cubre((E[e[0]].registros || {})[tipo]); });
+      if (!filas.length) return '';
+      var t = {cn: 0, cs: 0, an: 0, as: 0};
+      var h = '<div class="d-carta"><h3 class="d-tit">' + titulo + ' · ' +
+        esc(self._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos">' +
+        '<thead><tr><th>Empresa</th><th class="num">ContaSis · ' + cols[0] + '</th>' +
+        '<th class="num">ContaSis · monto</th><th class="num">AXION · ' + cols[1] + '</th>' +
+        '<th class="num">AXION · monto</th></tr></thead><tbody>';
+      filas.forEach(function (e) {
+        var m = ((E[e[0]].registros[tipo].meses) || {})[mes] || {n: 0, total: 0};
+        var a = ax[e[0]] || {n: 0, s: 0};
+        t.cn += m.n; t.cs += m.total; t.an += a.n; t.as += a.s;
+        h += '<tr' + (e[0] === self._emp ? ' class="cs-sel"' : '') + '><td class="obra">' +
+          esc(e[1]) + '</td><td class="num">' + ent(m.n) + '</td><td class="num">' +
+          soles(m.total) + '</td><td class="num">' + ent(a.n) + '</td><td class="num">' +
+          soles(a.s) + '</td></tr>';
+      });
+      return h + '<tr class="total"><td class="obra">TOTAL</td><td class="num">' + ent(t.cn) +
+        '</td><td class="num">' + soles(t.cs) + '</td><td class="num">' + ent(t.an) +
+        '</td><td class="num">' + soles(t.as) + '</td></tr></tbody></table></div></div>';
+    };
+    return tabla('Ventas', 'ventas', axV, ['comprobantes', 'contratos']) +
+      (hayOC ? tabla('Compras', 'compras', axC, ['facturas', 'órdenes de compra']) : '');
+  },
+
+  detalle: function (id) {
+    var mes = this._mes(), ruc = this._emp, self = this;
+    if (!mes) return null;
+    if (id === "cp-tras") return this._verTraspasos(ruc, mes);
+    var m = /^cp-(entro|cobros|salio)$/.exec(id);
+    if (!m) return null;
+    var L = this._lados(ruc, mes, m[1]);
+    if (!L.cs) return null;
+    var P = this._emparejar(L.cs, L.ax);
+    var rot = this._FILAS.filter(function (f) { return f[0] === m[1]; })[0][1];
+    var nombre = this._EMPS.filter(function (e) { return e[0] === ruc; })[0][1];
+    var suma = function (l) { return l.reduce(function (a, x) { return a + x.monto; }, 0); };
+    var h = '<button class="cerrar">Cerrar</button><h3>' + esc(rot) + ' · ' + esc(nombre) +
+      ' · ' + esc(this._mesTxt(mes)) + '</h3><div class="envoltura-tabla"><table class="datos">' +
+      '<thead><tr><th>Movimientos</th><th class="num">Cantidad</th><th class="num">Monto</th>' +
+      '</tr></thead><tbody>' +
+      '<tr><td class="obra">Con pareja en las dos fuentes</td><td class="num">' + ent(P.n) +
+      '</td><td class="num">' + soles(P.monto) + '</td></tr>' +
+      '<tr><td class="obra">Solo en ContaSis</td><td class="num">' + ent(P.soloA.length) +
+      '</td><td class="num">' + soles(suma(P.soloA)) + '</td></tr>' +
+      '<tr><td class="obra">Solo en AXION</td><td class="num">' + ent(P.soloB.length) +
+      '</td><td class="num">' + soles(suma(P.soloB)) + '</td></tr></tbody></table></div>';
+    if (P.soloA.length) {
+      h += '<h3>Solo en ContaSis</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Fecha</th><th>Cuenta</th><th>Empresa · comprobante</th><th class="num">Monto</th>' +
+        '</tr></thead><tbody>';
+      P.soloA.forEach(function (x) {
+        var r = x.r;
+        h += '<tr><td class="gris">' + esc(x.fecha) + '</td><td class="obra">' + esc(r.cuenta) +
+          ' · ' + esc(r.nombre) + '</td><td class="obra">' + esc(r.empresa) +
+          (r.numero ? '<span class="ob-sub"> · ' + esc(r.numero) + '</span>' : '') +
+          '</td><td class="num">' + soles(x.monto) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    if (P.soloB.length) {
+      h += '<h3>Solo en AXION</h3><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Fecha</th><th>Cuenta</th><th>Concepto</th><th class="num">Monto</th>' +
+        '</tr></thead><tbody>';
+      P.soloB.forEach(function (x) {
+        var r = x.r;
+        h += '<tr><td class="gris">' + esc(x.fecha) + '</td><td class="obra">' + esc(r.cuenta) +
+          '</td><td class="obra">' + esc(r.concepto) + '<span class="ob-sub"> · ' + esc(r.mov) +
+          '</span></td><td class="num">' + soles(x.monto) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    return h;
+  },
+
+  _verTraspasos: function (ruc, mes) {
+    var TR = this._traspasos(ruc, mes);
+    var nombre = this._EMPS.filter(function (e) { return e[0] === ruc; })[0][1];
+    var h = '<button class="cerrar">Cerrar</button><h3>Salida con su contrapartida · ' +
+      esc(nombre) + ' · ' + esc(this._mesTxt(mes)) +
+      '</h3><div class="envoltura-tabla"><table class="datos"><thead><tr><th>Fecha</th>' +
+      '<th>Sale de</th><th>Entra a</th><th class="num">Monto</th></tr></thead><tbody>';
+    TR.slice().sort(function (p, q) {
+      return String(p.fecha).localeCompare(String(q.fecha)); }).forEach(function (r) {
+      h += '<tr><td class="gris">' + esc(r.fecha) + '</td><td class="obra">' +
+        esc(r.cuenta) + '<span class="ob-sub"> · ' + esc(r.concepto) + '</span></td>' +
+        '<td class="obra">' + esc(r.traspaso.cuenta) + '<span class="ob-sub"> · ' +
+        esc(r.traspaso.concepto) + '</span></td><td class="num">' + soles(r.monto) +
+        '</td></tr>';
+    });
+    return h + '<tr class="total"><td class="obra">TOTAL</td><td></td><td></td>' +
+      '<td class="num">' + soles(TR.reduce(function (a, x) { return a + x.monto; }, 0)) +
+      '</td></tr></tbody></table></div>';
+  },
+
+  conectar: function () {
+    var self = this;
+    var caja = document.getElementById("cp-caja");
+    if (!caja) return;
+    caja.addEventListener("change", function (e) {
+      var s = e.target;
+      if (!s || !s.id) return;
+      if (s.id === "cp-mes") self._mesSel = s.value;
+      else if (s.id === "cp-emp") self._emp = s.value;
+      else return;
+      caja.innerHTML = self._cuerpo();
+      if (typeof conectarAbribles === "function") conectarAbribles(caja);
+    });
+    caja.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-cp-emp],[data-cp-mes]") : null;
+      if (!b) return;
+      if (b.hasAttribute("data-cp-mes")) self._mesSel = b.getAttribute("data-cp-mes");
+      else self._emp = b.getAttribute("data-cp-emp");
+      caja.innerHTML = self._cuerpo();
+      if (typeof conectarAbribles === "function") conectarAbribles(caja);
+    });
+  }
+};
+</script>
+</body>
+</html>

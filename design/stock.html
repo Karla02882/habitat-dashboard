@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Stock</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "stock",
+  nombre: "Propiedades Habitat",
+  titulo: "Propiedades Habitat",
+  pregunta: "¿Qué hay para vender hoy?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+
+  _abierto: "",
+  _busca: "",
+  _tipo: "",
+  _mz: "",
+  _vivo: null,        /* lo último que contestó /stock-vivo */
+  _pideVivo: 0,
+  _firma: "",         /* huella de la lista que está pintada */
+  _verif: {},
+  _filas: {},         /* la fila de la lista de cada unidad, para comparar */
+  _D: null,
+  _timer: null,
+
+  /* ── la fuente: el stock en vivo si es el más nuevo, y si no el del tablero ── */
+  _fuente: function (D) {
+    this._D = D || this._D;
+    var t = ((this._D || {}).stock) || {}, v = this._vivo;
+    if (v && v.hay && (!t.hay || (v.leido_ts || 0) >= (t.leido_ts || 0))) return v;
+    return t;
+  },
+  _firmaDe: function (S) {
+    return JSON.stringify((S.proyectos || []).map(function (p) {
+      return [p.proyecto, p.tipo, (p.filas || []).map(function (f) { return f.slice(0, 7); })];
+    }));
+  },
+  _pedirVivo: function (fuerza) {
+    var self = this, ahora = Date.now();
+    if (!fuerza && ahora - this._pideVivo < 20000) return;
+    this._pideVivo = ahora;
+    fetch("/stock-vivo", {cache: "no-store"})
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (j) {
+        if (!j || !j.hay) return;
+        var antes = self._firmaDe(self._fuente(null));
+        self._vivo = j;
+        if (window.HOJA !== self) return;
+        if (self._firmaDe(self._fuente(null)) !== antes) pintar();
+        else self._tickSello();
+      })
+      .catch(function () { /* sin stock en vivo: se sigue con el del tablero */ });
+  },
+  _fdm: function (s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}))?/.exec(String(s || ""));
+    return m ? m[3] + "/" + m[2] + (m[4] ? " " + m[4] : "") : String(s || "");
+  },
+  _hace: function (S) {
+    if (!S.leido_ts) return null;
+    return Math.max(0, Math.round((Date.now() / 1000 - S.leido_ts) / 60));
+  },
+  _selloHtml: function (S) {
+    if (!S.leido) return "";
+    var n = this._hace(S), viejo = n !== null && n > 15;
+    return '<div class="d-sub st-sello" id="st-sello">Leído de AXION a las ' +
+      esc(String(S.leido).slice(11)) + ' · <span class="' + (viejo ? 'sem-mal' : 'sem-ok') + '">' +
+      (n === null ? '—' : 'hace ' + ent(n) + ' min') + '</span>' +
+      (S.ultima_edicion ? ' · Último cambio hecho en AXION: ' + esc(this._fdm(S.ultima_edicion)) : '') +
+      '</div>';
+  },
+  _tickSello: function () {
+    var e = document.getElementById("st-sello");
+    if (!e) return;
+    var S = this._fuente(null);
+    if (!S.leido) return;
+    e.outerHTML = this._selloHtml(S);
+  },
+
+  _vfHtml: function (f) {
+    var id = f[6], v = this._verif[id];
+    var boton = function (rot) {
+      return '<button type="button" class="st-vf-btn" data-id="' + esc(id) + '">' + rot + '</button>';
+    };
+    if (!v) return boton('Verificar ahora');
+    if (v.cargando) return '<span class="st-vf-res">Consultando a AXION…</span>';
+    return '<span class="st-vf-res ' + v.clase + '">' + esc(v.texto) + '</span> ' + boton('Otra vez');
+  },
+  _pintarCelda: function (id) {
+    var self = this, f = this._filas[id];
+    document.querySelectorAll('td.st-vf[data-id="' + id + '"]').forEach(function (td) {
+      td.innerHTML = f ? self._vfHtml(f) : "";
+      var b = td.querySelector(".st-vf-btn");
+      if (b) b.addEventListener("click", function (e) { e.stopPropagation(); self._verificar(id); });
+    });
+  },
+  _verificar: function (id) {
+    var self = this, f = this._filas[id];
+    if (!f) return;
+    this._verif[id] = {cargando: true};
+    this._pintarCelda(id);
+    var fin = function (clase, texto) { self._verif[id] = {clase: clase, texto: texto}; self._pintarCelda(id); };
+    fetch("/verificar-unidad?id=" + encodeURIComponent(id), {cache: "no-store"})
+      .then(function (r) {
+        return r.json().catch(function () { return {ok: false, motivo: "HTTP " + r.status}; });
+      })
+      .then(function (j) {
+        if (!j || !j.ok) return fin("sem-casi", "No se pudo verificar: " + ((j && j.motivo) || "sin respuesta"));
+        if (!j.existe) return fin("sem-mal", "✗ Ya no existe en AXION · " + j.consultado);
+        var cambios = [];
+        if (j.estado !== "LIBRE") cambios.push("ahora está " + String(j.estado || "sin estado").toLowerCase());
+        var pl = f[3], pa = j.precio;
+        if ((pl === null || pl === undefined) !== (pa === null || pa === undefined) ||
+            (pa !== null && pl !== null && pl !== undefined && Math.abs(pa - pl) >= 0.005)) {
+          cambios.push("precio " + (pa === null ? "sin precio" : soles(pa)) + " (la lista decía " +
+            (pl === null || pl === undefined ? "sin precio" : soles(pl)) + ")");
+        }
+        var al = f[2], aa = j.area;
+        if (aa !== null && al !== null && al !== undefined && Math.abs(aa - al) >= 0.005) {
+          cambios.push(fmt1(aa) + " m² (la lista decía " + fmt1(al) + ")");
+        }
+        if (cambios.length) return fin("sem-mal", "✗ CAMBIÓ: " + cambios.join(" · ") + " · " + j.consultado);
+        fin("sem-ok", "✓ Libre · " + (pa === null ? "sin precio" : soles(pa)) + " · verificado " + j.consultado);
+      })
+      .catch(function () { fin("sem-casi", "No se pudo verificar: sin conexión con el servidor"); });
+  },
+
+  pintar: function (M, D) {
+    var S = this._fuente(D);
+    this._pedirVivo(false);
+    this._firma = this._firmaDe(S);
+    if (!S.hay) {
+      return '<div class="d-lienzo"><div class="tarjeta">' +
+        '<span class="overline">Stock</span>' +
+        '<p class="mas">' + esc(S.motivo || "sin stock publicado") +
+        ' · Administración</p></div></div>';
+    }
+    var self = this;
+    var bus = (this._busca || "").toUpperCase();
+    var abierto = this._abierto, tipo = this._tipo;
+
+    var visto = function (p) {
+      if (!bus) return p.filas || [];
+      if (String(p.proyecto).toUpperCase().indexOf(bus) >= 0) return p.filas || [];
+      return (p.filas || []).filter(function (f) {
+        return String(f[0]).toUpperCase().indexOf(bus) >= 0;
+      });
+    };
+    var entraTipo = function (p) { return !tipo || p.tipo === tipo; };
+    var rango = function (a, b, fn) {
+      if (a === null || a === undefined) return "—";
+      return (a === b) ? fn(a) : (fn(a) + " – " + fn(b));
+    };
+
+    var h = '<div class="d-lienzo">' + this._selloHtml(S);
+
+    h += '<div class="st-barra">' +
+      '<label class="st-campo">Buscar<input id="st-busca" type="search" ' +
+      'placeholder="proyecto, lote, dpto…" value="' + esc(this._busca || "") +
+      '"></label>' +
+      '<div class="st-tipos">' +
+        '<button type="button" class="st-pill' + (tipo ? '' : ' st-pill-on') +
+        '" data-tipo="">Todos</button>' +
+        (S.tipos || []).map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (tipo === x ? ' st-pill-on' : '') + '" data-tipo="' + esc(x) + '">' +
+            esc(x) + '</button>';
+        }).join("") +
+      '</div></div>';
+
+    h += '<div class="st-grid">';
+    var conAlgo = 0;
+    (S.proyectos || []).forEach(function (p, i) {
+      if (!entraTipo(p)) return;
+      var filas = visto(p);
+      if (!filas.length) return;
+      conAlgo++;
+      var id = "p" + i;
+      var esta = (abierto === id);
+      h += '<div class="st-tarj' + (esta ? ' st-on' : '') + '" data-proy="' + id + '" ' +
+        'tabindex="0" role="button" aria-expanded="' + (esta ? 'true' : 'false') + '">' +
+        '<div class="st-nom">' + esc(p.proyecto) +
+          '<span class="st-tipo">' + esc(p.tipo || "") + '</span></div>' +
+        '<div class="st-libres"><b>' + ent(filas.length) + '</b> libres</div>' +
+        '<div class="st-rango">' +
+          rango(p.precio_min, p.precio_max, function (x) { return soles(x); }) +
+        '</div>' +
+        '<div class="st-rango st-chico">' +
+          rango(p.area_min, p.area_max, function (x) { return fmt1(x) + ' m²'; }) +
+        '</div>' +
+        '<div class="st-ver">' + (esta ? 'Cerrar' : 'Ver el stock') + '</div>' +
+        '</div>';
+    });
+    h += '</div>';
+
+    /* la lista del proyecto abierto */
+    var elegido = null;
+    (S.proyectos || []).forEach(function (p, i) {
+      if (abierto === "p" + i && entraTipo(p)) elegido = p;
+    });
+    if (elegido) {
+      var filas = visto(elegido);
+      var MZ_RE = /\bMZ\.?\s*([A-Z0-9]+)\b/i;
+      var mzDe = function (f) { var m = MZ_RE.exec(String(f[0] || "")); return m ? m[1].toUpperCase() : ""; };
+      var cuentaMz = {};
+      filas.forEach(function (f) { var k = mzDe(f); if (k) cuentaMz[k] = (cuentaMz[k] || 0) + 1; });
+      var mzs = Object.keys(cuentaMz).sort(function (a, b) {
+        return a.localeCompare(b, "es", {numeric: true}); });
+      var conMz = mzs.length >= 2;
+      if (!conMz || (self._mz && !cuentaMz[self._mz])) self._mz = "";
+      var totalProy = filas.length;
+      if (self._mz) filas = filas.filter(function (f) { return mzDe(f) === self._mz; });
+      var esDepa = (elegido.tipo === "Departamentos");
+      var verD = esDepa && elegido.hay_dorm;
+      var verB = esDepa && elegido.hay_bano;
+      /* sin identificador de unidad (el stock viejo del tablero) no hay botón */
+      var verV = filas.some(function (f) { return !!f[6]; });
+      h += '<div class="tarjeta st-lista">' +
+        '<button type="button" class="st-cerrar" aria-label="Cerrar">✕</button>' +
+        '<span class="overline">' + esc(elegido.proyecto) +
+        '<span class="st-cuenta">' + ent(filas.length) + ' libres</span></span>' +
+        (elegido.edicion ? '<div class="d-sub st-edicion">Último cambio de estas unidades en AXION: ' +
+          esc(self._fdm(elegido.edicion)) + '</div>' : '') +
+        (conMz ? '<div class="st-tipos st-mzs"><span class="st-mz-rot">Manzana</span>' +
+          '<button type="button" class="st-pill' + (self._mz ? '' : ' st-pill-on') +
+          '" data-mz="">Todas · ' + ent(totalProy) + '</button>' +
+          mzs.map(function (k) {
+            return '<button type="button" class="st-pill' + (self._mz === k ? ' st-pill-on' : '') +
+              '" data-mz="' + esc(k) + '">' + esc(k) + ' · ' + ent(cuentaMz[k]) + '</button>';
+          }).join("") + '</div>' : '') +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Unidad</th><th>Estado</th><th class="num">m²</th>' +
+        '<th class="num">Precio</th>' +
+        (verD ? '<th class="num">N° dorm.</th>' : '') +
+        (verB ? '<th class="num">N° baños</th>' : '') +
+        (verV ? '<th>Verificar</th>' : '') +
+        '</tr></thead><tbody>';
+      filas.forEach(function (f) {
+        h += '<tr><td class="obra">' + esc(f[0]) + '</td>' +
+          '<td class="sem-ok">' + esc(f[1]) + '</td>' +
+          '<td class="num">' + (f[2] === null || f[2] === undefined
+            ? '—' : fmt1(f[2])) + '</td>' +
+          '<td class="num">' + (f[3] === null || f[3] === undefined
+            ? '—' : soles(f[3])) + '</td>' +
+          (verD ? '<td class="num">' + (f[4] === null || f[4] === undefined
+            ? '—' : ent(f[4])) + '</td>' : '') +
+          (verB ? '<td class="num">' + (f[5] === null || f[5] === undefined
+            ? '—' : ent(f[5])) + '</td>' : '') +
+          (verV ? '<td class="st-vf" data-id="' + esc(f[6]) + '">' + (function () {
+            self._filas[f[6]] = f; return self._vfHtml(f); })() + '</td>' : '') +
+          '</tr>';
+      });
+      h += '</tbody></table></div></div>';
+    }
+
+    if (!conAlgo) {
+      h += '<div class="tarjeta"><p class="mas">Ninguna unidad con esa búsqueda</p></div>';
+    }
+    if (S.sin_stock) {
+      h += '<p class="mas">Fuera de esta lista · ' + ent(S.sin_stock) +
+        ' proyectos sin unidades libres</p>';
+    }
+    if ((S.avisos_campos || []).length) {
+      h += '<p class="mas">' + S.avisos_campos.map(esc).join(' · ') +
+        ' · Comercial</p>';
+    }
+    if ((S.sin_tipo || []).length) {
+      h += '<p class="mas">Sin tipo de proyecto en AXION · ' +
+        S.sin_tipo.map(esc).join(' · ') + ' · Comercial</p>';
+    }
+    return h + '</div>';
+  },
+
+  conectar: function () {
+    var self = this;
+    document.querySelectorAll("#hoja .st-tarj").forEach(function (el) {
+      var abrir = function () {
+        var id = el.getAttribute("data-proy");
+        self._abierto = (self._abierto === id) ? "" : id;
+        self._mz = "";
+        pintar();
+        /* si quedó abierta, se lleva la lista a la vista */
+        if (self._abierto) {
+          setTimeout(function () {
+            var l = document.querySelector("#hoja .st-lista");
+            if (l) l.scrollIntoView({behavior: "smooth", block: "start"});
+          }, 60);
+        }
+      };
+      el.addEventListener("click", abrir);
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); }
+      });
+    });
+    document.querySelectorAll("#hoja .st-pill[data-tipo]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._tipo = el.getAttribute("data-tipo") || "";
+        pintar();
+      });
+    });
+    document.querySelectorAll("#hoja .st-pill[data-mz]").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.stopPropagation();
+        self._mz = el.getAttribute("data-mz") || "";
+        pintar();
+      });
+    });
+    var b = document.getElementById("st-busca");
+    if (b) {
+      b.addEventListener("input", function () {
+        self._busca = b.value;
+        var pos = b.selectionStart;
+        pintar();
+        var n = document.getElementById("st-busca");
+        if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+    var x = document.querySelector("#hoja .st-cerrar");
+    if (x) x.addEventListener("click", function () { self._abierto = ""; pintar(); });
+    document.querySelectorAll("#hoja .st-vf-btn").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.stopPropagation();
+        self._verificar(el.getAttribute("data-id"));
+      });
+    });
+    if (!this._timer) {
+      this._timer = setInterval(function () {
+        if (window.HOJA !== self) return;
+        self._pedirVivo(true);
+        self._tickSello();
+      }, 60000);
+    }
+  }
+};
+</script>
+</body>
+</html>

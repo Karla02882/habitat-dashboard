@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ventas KPI · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-asesor"><label for="f-asesor">Vendedor</label><select id="f-asesor"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "ventas-kpi",
+  nombre: "Ventas KPI",
+  pregunta: "¿Cómo va el embudo de ventas contra los KPI del jefe de comercial?",
+  fuentes: ["KOMMO", "AXION"],
+
+  filtros: ["asesor"],
+  sinRazonObra: true,
+
+  _CHIP: {
+    "Ventas cerradas": "✎",
+    "Leads generados (propios)": "☏",
+    "Leads generados (marketing)": "◎",
+    "Total leads": "∑",
+    "Leads calificados": "★",
+    "% Contactabilidad": "☎",
+    "Tiempo de primera respuesta": "⏱",
+    "% Lead → Visita": "⌂",
+    "% Visitas realizadas": "✓",
+    "% Lead → Venta": "◈"
+  },
+
+  _meta: function (kpi, nAsesores) {
+    var m = (this._MET || {})[kpi];
+    if (!m) return null;
+    if (ASESOR || m.escala !== "por_asesor" || !nAsesores) return m;
+    var e = {};
+    Object.keys(m).forEach(function (k) { e[k] = m[k]; });
+    e.meta = m.meta * nAsesores;
+    e.ambar = m.ambar * nAsesores;
+    e.equipo = m.meta + " × " + nAsesores + " asesores";
+    return e;
+  },
+
+  /* verde cumple · ámbar llega al 80% · rojo no llega */
+  _sem: function (valor, meta) {
+    if (valor === null || valor === undefined || !meta) return "";
+    var ok = (meta.mejor === "menor") ? (valor <= meta.meta) : (valor >= meta.meta);
+    if (ok) return "ok";
+    var casi = (meta.mejor === "menor") ? (valor <= meta.ambar) : (valor >= meta.ambar);
+    return casi ? "casi" : "mal";
+  },
+
+  _fmt: function (v, u) {
+    if (v === null || v === undefined) return "—";
+    return u === "%" ? fmt1(v) + "%" : (u === "min" ? fmt1(v / 60) + " h" : ent(v));
+  },
+
+  _armar: function (base, pz) {
+    var s = {leads: 0, contactados: 0, visitas: 0, agendadas: 0,
+             realizadas: 0, ventas: 0, propios: 0, calificados: 0};
+    var resp = [];
+    pz.forEach(function (x) {
+      Object.keys(s).forEach(function (k) { s[k] += (x[k] || 0); });
+      if (x.resp_min !== null && x.resp_min !== undefined) resp.push(x.resp_min);
+    });
+    resp.sort(function (a, b) { return a - b; });
+    var med = resp.length
+      ? (resp.length % 2 ? resp[(resp.length - 1) / 2]
+         : (resp[resp.length / 2 - 1] + resp[resp.length / 2]) / 2) : null;
+    var pc = function (a, b) { return b ? Math.round(1000 * a / b) / 10 : null; };
+    var v = {
+      "Ventas cerradas": s.ventas,
+      "Leads generados (propios)": s.propios,
+      "Leads generados (marketing)": s.leads - s.propios,
+      "Total leads": s.leads,
+      "Leads calificados": pc(s.calificados, s.leads),
+      "% Contactabilidad": pc(s.contactados, s.leads),
+      "Tiempo de primera respuesta": med,
+      "% Lead → Visita": pc(s.visitas, s.leads),
+      "% Visitas realizadas": pc(s.realizadas, s.agendadas),
+      "% Lead → Venta": pc(s.ventas, s.leads)
+    };
+    var det = {
+      "Ventas cerradas": ent(s.ventas) + " contratos en AXION",
+      "Leads generados (propios)": "cargados en AXION",
+      "Leads generados (marketing)": "total menos los propios",
+      "Total leads": "creados en el período · Kommo",
+      "% Contactabilidad": ent(s.contactados) + " de " + ent(s.leads),
+      "Tiempo de primera respuesta": "mediana, no promedio",
+      "Leads calificados": ent(s.calificados) + " en Seguimiento, Visita, Pre cierre o Vendido",
+      "% Lead → Visita": ent(s.visitas) + " visitas concretadas · AXION",
+      "% Visitas realizadas": ent(s.realizadas) + " de " + ent(s.agendadas) + " agendadas · AXION",
+      "% Lead → Venta": ent(s.ventas) + " sobre " + ent(s.leads) + " leads"
+    };
+    return base.map(function (k) {
+      var o = {};
+      Object.keys(k).forEach(function (x) { o[x] = k[x]; });
+      if (v.hasOwnProperty(k.kpi)) {
+        o.valor = v[k.kpi];
+        o.detalle = det[k.kpi] || k.detalle;
+      }
+      return o;
+    });
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var KV = ((M.crm || {}).kpis_ventas) || {};
+    if (!KV.hay || !(KV.kpis || []).length) {
+      var crmVivo = !!((M.crm || {}).disponible);
+      return '<div class="d-lienzo"><div class="d-carta">' +
+        '<div class="d-cifra">—</div>' +
+        '<div class="d-exacta">' + (crmVivo
+          ? 'la data publicada es anterior a este bloque'
+          : 'el CRM no devolvió datos en este período') + '</div>' +
+        '<div class="d-pie">' + (crmVivo
+          ? 'aprieta «Actualizar ahora» y vuelve a entrar en unos minutos'
+          : 'Kommo sin respuesta en la última corrida') + '</div>' +
+        '</div></div>';
+    }
+
+    var MET = D.metas_ventas || {};
+    var piezas = KV.por_asesor || [];
+    var mismoP = this._mismo;
+    var suyas = ASESOR ? piezas.filter(function (x) {
+      return String(x.asesor).toUpperCase() === String(ASESOR).toUpperCase() ||
+        mismoP(x.asesor, ASESOR); }) : [];
+    var uno = null;
+    if (suyas.length) {
+      uno = {asesor: ASESOR};
+      suyas.forEach(function (x) {
+        Object.keys(x).forEach(function (c) {
+          if (typeof x[c] === "number" && c !== "resp_min") uno[c] = (uno[c] || 0) + x[c];
+        });
+      });
+    }
+    var sinPiezas = ASESOR && !uno;
+    var kpis = (ASESOR && uno) ? this._armar(KV.kpis, suyas) : KV.kpis;
+    if (sinPiezas) {
+      return '<div class="d-lienzo"><div class="d-carta">' +
+        '<div class="d-cab"><span class="d-chip">◍</span>' +
+        '<span class="d-preg">' + esc(ASESOR) + '</span></div>' +
+        '<div class="d-cifra">—</div>' +
+        '<div class="d-exacta">' + (piezas.length
+          ? 'no tiene leads en este período'
+          : 'la data publicada es anterior al reparto por asesor') + '</div>' +
+        '<div class="d-pie">' + (piezas.length
+          ? 'elige otro período o quita el filtro'
+          : 'aprieta «Actualizar ahora» y vuelve en unos minutos') +
+        '</div></div></div>';
+    }
+    var fuera = KV.fuera_del_crm || {};
+
+    this._kpis = kpis; this._MET = MET; this._KV = KV;
+    this._uno = uno; this._piezas = piezas;
+    this._suyasN = suyas.map(function (x) { return String(x.asesor).toUpperCase(); });
+    this._contratos = [].concat.apply([], ((M.estructura || {}).modalidad || [])
+      .map(function (mo) { return mo.detalle || []; }));
+
+    var nAses = 0;
+    piezas.forEach(function (x) { if (x.leads > 0) nAses++; });
+    this._nAses = nAses;
+
+    var conMeta = 0, cumplen = 0, conDato = 0;
+    kpis.forEach(function (k) {
+      if (k.valor !== null && k.valor !== undefined) conDato++;
+      var m = self._meta(k.kpi, nAses);
+      if (m && k.valor !== null && k.valor !== undefined) {
+        conMeta++;
+        if (self._sem(k.valor, m) === "ok") cumplen++;
+      }
+    });
+    this._conMeta = conMeta; this._cumplen = cumplen; this._conDato = conDato;
+
+    var h = '<div class="d-lienzo">';
+
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-kpi-saldo d-abrible abrible" data-abre="kv-resumen" ' +
+      'aria-expanded="false" tabindex="0" role="button">' +
+      '<div class="d-cab"><span class="d-chip">◍</span>' +
+      '<span class="d-preg">¿Llega a la meta?</span></div>' +
+      '<div class="d-cifra">' + ent(cumplen) + ' de ' + ent(conMeta) + '</div>' +
+      '<div class="d-exacta">' + (ASESOR ? esc(ASESOR)
+        : 'el equipo · ' + ent(nAses) + ' asesores con leads') + '</div>' +
+      '<div class="d-pie">' + ent(conDato) + ' de ' + ent(kpis.length) +
+      ' KPI con fuente · clic para el detalle</div></div>';
+
+    var resumen = [];
+    resumen.forEach(function (r) {
+      var k = null;
+      kpis.forEach(function (x) { if (x.kpi === r.k) k = x; });
+      if (!k) return;
+      var m = self._meta(k.kpi, nAses);
+      var c = self._sem(k.valor, m);
+      h += '<div class="d-carta d-abrible abrible" data-abre="kvt-' +
+        self._id(k.kpi) + '" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">' + (self._CHIP[k.kpi] || '•') +
+        '</span><span class="d-preg">' + esc(r.p) + '</span></div>' +
+        '<div class="d-cifra' + (c ? ' sem-t-' + c : '') + '">' +
+        self._fmt(k.valor, k.unidad) + '</div>' +
+        '<div class="d-exacta">' + esc(k.detalle || '') + '</div>' +
+        '<div class="d-pie">' + (m
+          ? '<span class="d-tag ' + (c === 'ok' ? 'ok' : (c === 'casi' ? '' : 'mal')) +
+            '">meta ' + self._fmt(m.meta, m.unidad) + '</span>' +
+            (c === 'ok' ? 'cumple' : (c === 'casi' ? 'cerca' : 'no llega'))
+          : 'clic para el detalle') + '</div></div>';
+    });
+    h += '</div>' + '<div class="detalle" id="det-kv-resumen"></div>';
+    resumen.forEach(function (r) {
+      h += '<div class="detalle" id="det-kvt-' + self._id(r.k) + '"></div>';
+    });
+
+    h += '</div>';
+    return h;
+  },
+
+  _diezHtml: function (M, D) {
+    var self = this;
+    var KV = ((M.crm || {}).kpis_ventas) || {};
+    if (!KV.hay || !(KV.kpis || []).length) return "";
+    var MET = D.metas_ventas || {};
+    var piezas = KV.por_asesor || [];
+    var mismoP = this._mismo;
+    var suyas = ASESOR ? piezas.filter(function (x) {
+      return String(x.asesor).toUpperCase() === String(ASESOR).toUpperCase() ||
+        mismoP(x.asesor, ASESOR); }) : [];
+    var uno = null;
+    if (suyas.length) {
+      uno = {asesor: ASESOR};
+      suyas.forEach(function (x) {
+        Object.keys(x).forEach(function (c) {
+          if (typeof x[c] === "number" && c !== "resp_min") uno[c] = (uno[c] || 0) + x[c];
+        });
+      });
+    }
+    if (ASESOR && !uno) return "";
+    var kpis = (ASESOR && uno) ? this._armar(KV.kpis, suyas) : KV.kpis;
+    var fuera = KV.fuera_del_crm || {};
+    this._kpis = kpis; this._MET = MET; this._KV = KV;
+    this._uno = uno; this._piezas = piezas;
+    this._suyasN = suyas.map(function (x) { return String(x.asesor).toUpperCase(); });
+    this._contratos = [].concat.apply([], ((M.estructura || {}).modalidad || [])
+      .map(function (mo) { return mo.detalle || []; }));
+    var nAses = 0;
+    piezas.forEach(function (x) { if (x.leads > 0) nAses++; });
+    this._nAses = nAses;
+    var conMeta = 0, cumplen = 0, conDato = 0;
+    kpis.forEach(function (k) {
+      if (k.valor !== null && k.valor !== undefined) conDato++;
+      var m = self._meta(k.kpi, nAses);
+      if (m && k.valor !== null && k.valor !== undefined) {
+        conMeta++;
+        if (self._sem(k.valor, m) === "ok") cumplen++;
+      }
+    });
+    var h = "";
+    h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">Los diez indicadores</h3>' +
+      '<p class="d-sub">' + ent(conDato) + ' con fuente' +
+      ' · ' + ent(cumplen) + ' de ' + ent(conMeta) + ' en meta' +
+      (ASESOR ? '' : ' · metas de conteo × ' + ent(nAses) + ' asesores') +
+      (!ASESOR && fuera.ventas
+        ? ' · ' + ent(fuera.ventas) + ' ventas de AXION sin usuario del CRM'
+        : '') + '</p>' +
+      '<div class="kpi-mini">';
+    kpis.forEach(function (k) {
+      var m = self._meta(k.kpi, nAses);
+      var c = self._sem(k.valor, m);
+      var vale = (k.valor !== null && k.valor !== undefined);
+      h += '<div class="kpi-m' + (vale ? '' : ' vacia') + (c ? ' sem-' + c : '') +
+        ' abrible" data-abre="kv-' + self._id(k.kpi) + '" ' +
+        'aria-expanded="false" tabindex="0" role="button">' +
+        '<span class="kpi-m-chip">' + (self._CHIP[k.kpi] || '•') + '</span>' +
+        '<span class="kpi-m-nom">' + esc(k.kpi) + '</span>' +
+        '<span class="kpi-m-val">' + (vale ? self._fmt(k.valor, k.unidad)
+                                            : 'sin dato') + '</span>' +
+        (m ? '<span class="kpi-m-meta">meta ' + self._fmt(m.meta, m.unidad) +
+             (m.equipo ? ' <i>(' + esc(m.equipo) + ')</i>' : '') +
+             '</span>' : '') + '</div>';
+    });
+    h += '</div></div>';
+    kpis.forEach(function (k) {
+      h += '<div class="detalle" id="det-kv-' + self._id(k.kpi) + '"></div>';
+    });
+    return h;
+  },
+
+  _mismo: function (a, b) {
+    var n = function (s) {
+      return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .toUpperCase().replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim().split(" ");
+    };
+    var wa = n(a), wb = n(b);
+    var com = wa.filter(function (x) { return x.length >= 4 && wb.indexOf(x) >= 0; }).length;
+    return com >= 2 && (wb.indexOf(wa[0]) >= 0 || wa.indexOf(wb[0]) >= 0);
+  },
+
+  /* id estable para el `data-abre` a partir del nombre del KPI */
+  _id: function (nombre) {
+    return String(nombre).toLowerCase()
+      .replace(/[áàä]/g, "a").replace(/[éèë]/g, "e").replace(/[íìï]/g, "i")
+      .replace(/[óòö]/g, "o").replace(/[úùü]/g, "u").replace(/ñ/g, "n")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  },
+
+  detalle: function (id) {
+    id = String(id).replace(/^kvt-/, "kv-");
+    if (id.indexOf("kv-") !== 0) return null;
+    var self = this;
+    var NE = "No existe";
+    var t = '<button class="cerrar">Cerrar</button>';
+    var vale = function (v) { return v !== null && v !== undefined; };
+    var tablaNE = function () {
+      return '<div class="envoltura-tabla"><table class="datos"><tbody>' +
+        '<tr><td class="obra">' + NE + '</td></tr></tbody></table></div>';
+    };
+
+    if (id === "kv-resumen") {
+      var conM = (this._kpis || []).filter(function (k) {
+        return self._meta(k.kpi, self._nAses) && vale(k.valor); });
+      var h0 = t + '<h3>Logrado contra la meta · ' +
+        (ASESOR ? esc(ASESOR) : 'el equipo') + '</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Indicador</th><th class="num">Logrado</th>' +
+        '<th class="num">Meta</th><th class="num">Ámbar</th>' +
+        '<th>¿Llegó?</th></tr></thead><tbody>';
+      if (!conM.length) {
+        return h0 + '<tr><td class="obra">' + NE + '</td>' +
+          '<td class="num">' + NE + '</td><td class="num">' + NE + '</td>' +
+          '<td class="num">' + NE + '</td><td>' + NE + '</td></tr>' +
+          '</tbody></table></div>';
+      }
+      return h0 + conM.map(function (k) {
+          var m = self._meta(k.kpi, self._nAses), c = self._sem(k.valor, m);
+          var cls = c === "ok" ? "sem-ok" : (c === "casi" ? "sem-casi" : "sem-mal");
+          return '<tr><td class="obra">' + esc(k.kpi) + '</td>' +
+            '<td class="num">' + self._fmt(k.valor, k.unidad) + '</td>' +
+            '<td class="num">' + self._fmt(m.meta, m.unidad) +
+            (m.equipo ? '<span class="ob-sub"> ' + esc(m.equipo) + '</span>' : '') +
+            '</td>' +
+            '<td class="num">' + (vale(m.ambar) ? self._fmt(m.ambar, m.unidad) : NE) +
+            '</td>' +
+            '<td class="' + cls + '">' +
+            (c === "ok" ? "sí" : (c === "casi" ? "cerca" : "no")) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+
+    var k = null;
+    (this._kpis || []).forEach(function (x) {
+      if ("kv-" + self._id(x.kpi) === id) k = x; });
+    if (!k) return null;
+    var m = this._meta(k.kpi, this._nAses);
+    var c = this._sem(k.valor, m);
+    var semC = c ? " sem-" + c : "";
+    var base = null;
+    ((this._KV || {}).kpis || []).forEach(function (x) {
+      if (x.kpi === k.kpi) base = x; });
+    var dg = base && base.desglose;
+    var h = t + '<h3>' + esc(k.kpi) +
+      (ASESOR ? ' · ' + esc(ASESOR) : (dg ? ' · por asesor' : ' · el equipo')) +
+      '</h3>';
+
+    if (k.falta) {
+      return h + '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cifra</th><th>Por qué no existe</th></tr></thead><tbody>' +
+        '<tr><td class="obra">' + NE + '</td><td style="white-space:normal">' +
+        esc(k.falta) + '</td></tr></tbody></table></div>';
+    }
+
+    if (k.kpi === "Total leads") {
+      var PZ = (this._piezas || []).filter(function (x) {
+        return !ASESOR || (self._suyasN || []).indexOf(String(x.asesor).toUpperCase()) >= 0; });
+      var TL = (this._KV || {}).leads, tC = 0;
+      (this._piezas || []).forEach(function (x) { tC += x.contactados || 0; });
+      var hl = h + '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Asesor</th><th class="num">Leads · Kommo</th><th class="num">% del total</th>' +
+        '<th class="num">Con primera llamada</th></tr></thead><tbody>';
+      if (!PZ.length) {
+        return hl + '<tr><td class="obra">' + NE + '</td><td class="num">' + NE + '</td>' +
+          '<td class="num">' + NE + '</td><td class="num">' + NE + '</td></tr></tbody></table></div>';
+      }
+      PZ.slice().sort(function (x, y) { return (y.leads || 0) - (x.leads || 0); }).forEach(function (x) {
+        hl += '<tr><td class="obra">' + esc(x.asesor) + '</td>' +
+          '<td class="num">' + ent(x.leads || 0) + '</td>' +
+          '<td class="num">' + (TL ? fmt1(100 * (x.leads || 0) / TL) + '%' : NE) + '</td>' +
+          '<td class="num">' + ent(x.contactados || 0) + '</td></tr>';
+      });
+      return hl + '<tr class="total"><td class="obra">' + (ASESOR ? 'TOTAL · equipo' : 'TOTAL') +
+        '</td><td class="num">' + (vale(TL) ? ent(TL) : NE) + '</td>' +
+        '<td class="num">' + (TL ? '100.0%' : NE) + '</td>' +
+        '<td class="num">' + ent(tC) + '</td></tr></tbody></table></div>';
+    }
+
+    if (dg) {
+      var cols = dg.columnas || [];
+      var axion = /AXION/.test(String(dg.titulo || ""));
+      var ixV = -1;
+      cols.forEach(function (cl, i) {
+        if (i && (cl === "%" || cl === "Minutos")) ixV = i; });
+      if (ixV < 0 && cols.length === 2) ixV = 1;
+      var filas = (dg.filas || []).filter(function (f) {
+        return !ASESOR ||
+          (self._suyasN || []).indexOf(String(f[0]).toUpperCase()) >= 0; });
+      var celda = function (x, cl, cls) {
+        if (cl === "Minutos") {
+          return '<td class="num' + cls + '">' + (vale(x) ? fmt1(x) : NE) + '</td>' +
+            '<td class="num' + cls + '">' + (vale(x) ? fmt1(x / 60) : NE) + '</td>';
+        }
+        return '<td class="num' + cls + '">' +
+          (!vale(x) ? NE : (cl === "%" ? fmt1(x) : ent(x))) + '</td>';
+      };
+      var nCel = 0;
+      h += '<div class="envoltura-tabla"><table class="datos"><thead><tr>';
+      cols.forEach(function (cl, i) {
+        var rs = !i ? [cl]
+          : (cl === "Minutos" ? ["Mediana (min)", "Mediana (h)"]
+             : [(axion && cl !== "%") ? cl + (cl === "Leads" ? " · Kommo" : " · AXION")
+                                      : cl]);
+        rs.forEach(function (r) {
+          nCel++;
+          h += '<th' + (i ? ' class="num"' : '') + '>' + esc(r) + '</th>';
+        });
+      });
+      h += '</tr></thead><tbody>';
+      var cero = {"Agendadas": 1, "Concretadas": 1, "Visitas": 1};
+      if (!filas.length) {
+        h += '<tr><td class="obra">' + (ASESOR ? esc(ASESOR) : 'El equipo') + '</td>';
+        cols.forEach(function (cl, i) {
+          if (i) h += celda(cero[cl] ? 0 : null, cl, "");
+        });
+        return h + '</tr></tbody></table></div>';
+      }
+      var suma = [], hay = [];
+      (dg.filas || []).forEach(function (f) {
+        f.forEach(function (x, i) {
+          if (i && typeof x === "number") { suma[i] = (suma[i] || 0) + x; hay[i] = true; }
+        });
+      });
+      filas.forEach(function (f) {
+        h += '<tr>';
+        f.forEach(function (x, i) {
+          if (!i) {
+            h += '<td class="obra">' + esc(x) +
+              (/sin usuario en Kommo/i.test(String(x))
+                ? '<span class="ob-sub">Comercial</span>' : '') + '</td>';
+            return;
+          }
+          h += celda(x, cols[i], (ASESOR && i === ixV) ? semC : "");
+        });
+        h += '</tr>';
+      });
+      var ixL = cols.indexOf("Leads"), tLeads = (self._KV || {}).leads;
+      if (ixL > 0 && vale(tLeads) && hay[ixL] && tLeads > suma[ixL]) {
+        if (!ASESOR) {
+          h += '<tr><td class="obra">' + (cols.indexOf("Minutos") >= 0
+            ? 'Asesores sin llamada medida' : 'Asesores fuera de este reparto') + '</td>';
+          cols.forEach(function (cl, i) {
+            if (i) h += celda(i === ixL ? tLeads - suma[ixL] : null, cl, "");
+          });
+          h += '</tr>';
+        }
+        suma[ixL] = tLeads;
+      }
+      var vEq = (base && vale(base.valor)) ? base.valor : k.valor;
+      h += '<tr class="total"><td class="obra">' + (ASESOR ? 'TOTAL · equipo' : 'TOTAL') + '</td>';
+      cols.forEach(function (cl, i) {
+        if (!i) return;
+        var v = (cl === "%" || cl === "Minutos") ? (ASESOR ? vEq : k.valor)
+                                                 : (hay[i] ? suma[i] : null);
+        h += celda(v, cl, "");
+      });
+      h += '</tr>';
+      return h + '</tbody></table></div>';
+    }
+
+    if (!vale(k.valor)) return h + tablaNE();
+    var uno = this._uno, fu = (this._KV || {}).fuera_del_crm || {};
+    var vBase = function (nombre) {
+      var v = null;
+      ((self._KV || {}).kpis || []).forEach(function (x) {
+        if (x.kpi === nombre) v = x.valor; });
+      return v;
+    };
+    var nf = function (v) { return vale(v) ? ent(v) : NE; };
+    var quien = ASESOR ? esc(ASESOR) : 'El equipo';
+    var nLeads = ASESOR ? (uno ? uno.leads : null) : (this._KV || {}).leads;
+    var cab = function (ths) {
+      return h + '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Vendedor</th>' + ths.map(function (x) {
+          return '<th class="num">' + esc(x) + '</th>'; }).join('') +
+        '</tr></thead><tbody>';
+    };
+
+    var normN = function (s) {
+      return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .toUpperCase().replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim();
+    };
+    var mismo = function (a, b) {
+      var wa = normN(a).split(" "), wb = normN(b).split(" ");
+      var com = wa.filter(function (x) { return x.length >= 4 && wb.indexOf(x) >= 0; }).length;
+      return com >= 2 && (wb.indexOf(wa[0]) >= 0 || wa.indexOf(wb[0]) >= 0);
+    };
+    var tabla = function (ths) {
+      return h + '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        ths.map(function (x, i) {
+          return '<th' + (x.num ? ' class="num"' : '') + '>' + esc(x.rot) + '</th>'; }).join('') +
+        '</tr></thead><tbody>';
+    };
+    var filaVacia = function (n) {
+      var c = '<tr>';
+      for (var i = 0; i < n; i++) c += '<td class="' + (i ? 'num' : 'obra') + '">' + NE + '</td>';
+      return c + '</tr>';
+    };
+    var pct1 = function (a, b) { return (vale(a) && b) ? fmt1(100 * a / b) + '%' : NE; };
+    var piezasV = (this._piezas || []).filter(function (x) {
+      return !ASESOR || (self._suyasN || []).indexOf(String(x.asesor).toUpperCase()) >= 0; });
+
+    var duenio = function (ax) {
+      var d = null;
+      (self._piezas || []).forEach(function (p) {
+        if (mismo(ax, p.asesor) && (!d || (p.leads || 0) > (d.leads || 0))) d = p;
+      });
+      return d ? String(d.asesor).toUpperCase() : "";
+    };
+
+    if (k.kpi === "Ventas cerradas") {
+      var cs = (this._contratos || []).filter(function (x) {
+        return !ASESOR || (self._suyasN || []).indexOf(duenio(x.asesor)) >= 0; })
+        .sort(function (a, b) { return String(b.fecha || "").localeCompare(String(a.fecha || "")); });
+      var hc = tabla([{rot: "Fecha"}, {rot: "Vendedor · AXION"}, {rot: "Obra"}, {rot: "Unidad"},
+                      {rot: "Monto", num: true}]);
+      if (!cs.length) return hc + filaVacia(5) + '</tbody></table></div>';
+      var totM = 0;
+      cs.forEach(function (x) {
+        totM += x.precio || 0;
+        hc += '<tr><td class="gris">' + esc(x.fecha || NE) + '</td>' +
+          '<td>' + esc(x.asesor || NE) + '</td>' +
+          '<td class="obra">' + esc(x.obra || NE) + '</td>' +
+          '<td>' + esc(x.unidad || NE) + '</td>' +
+          '<td class="num">' + soles(x.precio || 0) + '</td></tr>';
+      });
+      return hc + '<tr class="total"><td class="obra">TOTAL · ' + ent(cs.length) +
+        (cs.length === 1 ? ' contrato' : ' contratos') + '</td><td></td><td></td><td></td>' +
+        '<td class="num">' + soles(totM) + '</td></tr></tbody></table></div>';
+    }
+
+    if (k.kpi === "Leads generados (propios)" || k.kpi === "Leads generados (marketing)" ||
+        k.kpi === "% Lead → Venta") {
+      var tipo = k.kpi === "% Lead → Venta" ? "venta"
+        : (k.kpi === "Leads generados (propios)" ? "propios" : "marketing");
+      var cols = tipo === "venta"
+        ? [{rot: "Asesor"}, {rot: "Leads · Kommo", num: true}, {rot: "Contratos · AXION", num: true}, {rot: "%", num: true}]
+        : [{rot: "Asesor"}, {rot: "Leads · Kommo", num: true}, {rot: "Propios · AXION", num: true},
+           {rot: tipo === "propios" ? "% de sus leads" : "De marketing", num: true}];
+      var ht = tabla(cols);
+      if (!piezasV.length) return ht + filaVacia(4) + '</tbody></table></div>';
+      var fila = function (rot, leads, b, c, cls) {
+        return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td class="obra">' + rot + '</td>' +
+          '<td class="num">' + nf(leads) + '</td><td class="num">' + nf(b) + '</td>' +
+          '<td class="num">' + c + '</td></tr>';
+      };
+      piezasV.slice().sort(function (a, b) {
+        var ka = tipo === "venta" ? a.ventas : a.propios, kb = tipo === "venta" ? b.ventas : b.propios;
+        return (kb || 0) - (ka || 0) || (b.leads || 0) - (a.leads || 0);
+      }).forEach(function (x) {
+        ht += tipo === "venta"
+          ? fila(esc(x.asesor), x.leads, x.ventas, pct1(x.ventas, x.leads).replace('%', ''))
+          : fila(esc(x.asesor), x.leads, x.propios,
+                 tipo === "propios" ? pct1(x.propios, x.leads) : nf((x.leads || 0) - (x.propios || 0)));
+      });
+      var campoFu = tipo === "venta" ? "ventas" : "propios";
+      if (!ASESOR && fu[campoFu]) {
+        ht += fila('Vendedores de AXION sin cruce con el CRM<span class="ob-sub">Comercial</span>',
+                   null, fu[campoFu], NE);
+      }
+      var tl = (this._KV || {}).leads;
+      var tProp = vBase("Leads generados (propios)"), tVen = vBase("Ventas cerradas");
+      ht += tipo === "venta"
+        ? fila(ASESOR ? 'TOTAL · equipo' : 'TOTAL', tl, tVen, fmt1(vBase("% Lead → Venta")), 'total')
+        : fila(ASESOR ? 'TOTAL · equipo' : 'TOTAL', tl, tProp,
+               tipo === "propios" ? pct1(tProp, tl) : nf(vBase("Leads generados (marketing)")), 'total');
+      return ht + '</tbody></table></div>';
+    }
+
+    /* cualquier otro KPI sin reparto: su cifra en una fila */
+    return cab([k.kpi]) + '<tr><td class="obra">' + quien + '</td>' +
+      '<td class="num' + semC + '">' + self._fmt(k.valor, k.unidad) + '</td></tr>' +
+      '</tbody></table></div>';
+  },
+
+  conectar: function () {
+    document.querySelectorAll("#hoja .abrible").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var caja = document.getElementById("det-" + el.getAttribute("data-abre"));
+        setTimeout(function () {
+          if (caja && caja.classList.contains("on"))
+            caja.scrollIntoView({behavior: "smooth", block: "start"});
+        }, 90);
+      });
+    });
+  }
+};
+</script>
+</body>
+</html>

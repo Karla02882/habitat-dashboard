@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Atención al cliente</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "atencion",
+  nombre: "Atención al cliente",
+  titulo: "Atención al cliente",
+  pregunta: "¿Cuántos reclamos hay, y cómo se están resolviendo?",
+  sinRazonObra: true,
+  filtros: [],
+
+  _abierto: "",
+  _busca: "",
+  _estado: "",
+  _prioridad: "",
+
+  _cerrado: function (e) { return e === "Resuelto" || e === "No se corregirá"; },
+
+  pintar: function (M, D) {
+    var todas = D.incidentes || [];
+    if (!todas.length) {
+      return '<div class="d-lienzo"><div class="tarjeta">' +
+        '<span class="overline">Atención al cliente</span>' +
+        '<p class="mas">La tabla Incident no devolvió filas — o el módulo ' +
+        'está vacío o AXION no la sirvió en la última lectura · Obra</p>' +
+        '</div></div>';
+    }
+    var self = this;
+    var bus = (this._busca || "").toUpperCase();
+    var est = this._estado, pri = this._prioridad;
+
+    /* EL PERÍODO, por la fecha de registro */
+    var pp = perPartes();
+    var pref = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+    var delPeriodo = todas.map(function (f, i) { f._i = i; return f; })
+      .filter(function (f) { return !pref || String(f.fecha || "").indexOf(pref) === 0; });
+
+    var visto = function (f) {
+      if (est === "Por resolver") { if (self._cerrado(f.estado)) return false; }
+      else if (est && f.estado !== est) return false;
+      if (pri && f.prioridad !== pri) return false;
+      if (!bus) return true;
+      return [f.cliente, f.obra, f.unidad, f.asignado, f.incidencia]
+        .some(function (v) { return String(v || "").toUpperCase().indexOf(bus) >= 0; });
+    };
+    /* ORDEN DE LLEGADA: fecha de registro y, el mismo día, la hora de carga */
+    var sel = delPeriodo.filter(visto).sort(function (a, b) {
+      return String(a.fecha || "").localeCompare(String(b.fecha || "")) ||
+             String(a.creado || "").localeCompare(String(b.creado || "")) ||
+             (b._i - a._i);
+    });
+    this._sel = sel;
+
+    var estados = {}, prioridades = {};
+    todas.forEach(function (f) { estados[f.estado] = 1; prioridades[f.prioridad] = 1; });
+    var base = ["Abierta", "En curso", "En revisión", "Resuelto", "No se corregirá"];
+    var ordenEstado = base.filter(function (x) { return estados[x]; })
+      .concat(Object.keys(estados).filter(function (x) { return base.indexOf(x) < 0; }).sort());
+    var ordenPrioridad = ["Alta", "Media", "Baja"].filter(function (x) { return prioridades[x]; })
+      .concat(Object.keys(prioridades).filter(function (x) {
+        return ["Alta", "Media", "Baja"].indexOf(x) < 0; }).sort());
+
+    var resueltas = 0, porResolver = 0, criticas = 0, sumaDias = 0, nDias = 0;
+    var abiertasPor = {};
+    sel.forEach(function (f) {
+      if (f.estado === "Resuelto") resueltas++;
+      if (!self._cerrado(f.estado)) {
+        porResolver++;
+        abiertasPor[f.estado] = (abiertasPor[f.estado] || 0) + 1;
+      }
+      if (f.prioridad === "Alta" && !self._cerrado(f.estado)) criticas++;
+      if (f.reclamo && f.visita) {
+        var d = (new Date(f.visita) - new Date(f.reclamo)) / 86400000;
+        if (d === d && d >= 0) { sumaDias += d; nDias++; }
+      }
+    });
+    var antes = pref ? todas.filter(function (f) {
+      return String(f.fecha || "") < pref && !self._cerrado(f.estado); }).length : 0;
+
+    var h = '<div class="d-lienzo">';
+
+    h += '<div class="rejilla-4">' +
+      '<div class="tarjeta"><span class="overline">Resueltas</span>' +
+      '<div class="cifra-g">' + ent(resueltas) + '</div>' +
+      '<p class="mas">de ' + ent(sel.length) + ' en este filtro</p></div>' +
+      '<div class="tarjeta at-porres" data-est-tarj="Por resolver" tabindex="0" role="button" style="cursor:pointer">' +
+      '<span class="overline">Por resolver</span>' +
+      '<div class="cifra-g">' + ent(porResolver) + '</div>' +
+      '<p class="mas">' + (porResolver ? ordenEstado.filter(function (x) { return abiertasPor[x]; })
+        .map(function (x) { return esc(x.toLowerCase()) + ' ' + ent(abiertasPor[x]); }).join(' · ')
+        : 'ninguna en este filtro') +
+      (antes ? ' · ' + ent(antes) + ' de meses anteriores' : '') + '</p></div>' +
+      '<div class="tarjeta"><span class="overline">Críticas</span>' +
+      '<div class="cifra-g">' + ent(criticas) + '</div>' +
+      '<p class="mas">prioridad Alta y sin resolver</p></div>' +
+      '<div class="tarjeta"><span class="overline">Tiempo prom. de atención</span>' +
+      '<div class="cifra-g">' + (nDias ? ent(Math.round(sumaDias / nDias)) + ' días' : '—') + '</div>' +
+      '<p class="mas">' + (nDias ? 'visita menos reclamo · ' + ent(nDias) + ' de ' + ent(sel.length) + ' con las dos fechas'
+        : 'ninguna incidencia trae las dos fechas') + '</p></div>' +
+      '</div>';
+
+    /* 2 · LA BARRA: buscador y los dos filtros */
+    h += '<div class="st-barra">' +
+      '<div class="bi-tot"><b>' + ent(sel.length) + '</b> incidencias' +
+      '<span class="st-sep">de ' + ent(delPeriodo.length) + ' en el período · ' +
+      ent(todas.length) + ' en total</span></div>' +
+      '<label class="st-campo">Buscar<input id="at-busca" type="search" ' +
+      'placeholder="cliente, obra, responsable…" value="' + esc(this._busca || "") +
+      '"></label>' +
+      '<div class="st-tipos">' +
+        '<button type="button" class="st-pill' + (est ? '' : ' st-pill-on') +
+        '" data-est="">Todos los estados</button>' +
+        '<button type="button" class="st-pill' + (est === "Por resolver" ? ' st-pill-on' : '') +
+        '" data-est="Por resolver">Por resolver</button>' +
+        ordenEstado.map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (est === x ? ' st-pill-on' : '') + '" data-est="' + esc(x) + '">' +
+            esc(x) + '</button>';
+        }).join("") +
+      '</div>' +
+      '<div class="st-tipos">' +
+        '<button type="button" class="st-pill' + (pri ? '' : ' st-pill-on') +
+        '" data-pri="">Toda prioridad</button>' +
+        ordenPrioridad.map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (pri === x ? ' st-pill-on' : '') + '" data-pri="' + esc(x) + '">' +
+            esc(x) + '</button>';
+        }).join("") +
+      '</div></div>';
+
+    /* 3 · LA TABLA, en orden de llegada */
+    var claseEstado = function (e) {
+      return e === "Resuelto" ? "at-ok" : e === "En curso" ? "at-medio"
+        : e === "Abierta" ? "at-alto" : "at-gris";
+    };
+    var clasePrioridad = function (p) {
+      return p === "Alta" ? "at-alto" : p === "Media" ? "at-medio" : "at-ok";
+    };
+    if (sel.length) {
+      h += '<div class="tarjeta"><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th class="num">N°</th><th>Registro</th><th>Cliente</th><th>Proyecto</th><th>Unidad</th>' +
+        '<th>Incidencia</th><th>Prioridad</th><th>Estado</th><th>Asignado a</th>' +
+        '</tr></thead><tbody>';
+      sel.forEach(function (f, i) {
+        var id = "a" + f._i, esta = (self._abierto === id);
+        h += '<tr class="at-fila' + (esta ? ' at-on' : '') + '" data-inc="' + id + '" ' +
+          'tabindex="0" role="button" aria-expanded="' + (esta ? 'true' : 'false') + '">' +
+          '<td class="num">' + ent(i + 1) + '</td>' +
+          '<td>' + esc(f.fecha || '—') + '</td>' +
+          '<td class="obra">' + esc(f.cliente || '—') + '</td>' +
+          '<td>' + esc(f.obra === "—" ? "(sin obra de AXION)" : f.obra) + '</td>' +
+          '<td>' + esc(f.unidad || '—') + '</td>' +
+          '<td>' + esc(f.incidencia || f.tipo || '—') + '</td>' +
+          '<td><span class="at-badge ' + clasePrioridad(f.prioridad) + '">' + esc(f.prioridad) + '</span></td>' +
+          '<td><span class="at-badge ' + claseEstado(f.estado) + '">' + esc(f.estado) + '</span></td>' +
+          '<td>' + esc(f.asignado || '—') + '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+    }
+
+    var elegida = null;
+    sel.forEach(function (f) { if (self._abierto === "a" + f._i) elegida = f; });
+    if (elegida) {
+      h += '<div class="tarjeta st-lista">' +
+        '<button type="button" class="st-cerrar" aria-label="Cerrar">✕</button>' +
+        '<span class="overline">' + esc(elegida.cliente || "—") +
+        '<span class="st-cuenta">' + esc(elegida.fecha) +
+        (elegida.telefono ? ' · ' + esc(elegida.telefono) : '') + '</span></span>' +
+        '<p class="mas"><b>Obra</b><br>' +
+        esc(elegida.obra === "—" ? "(sin obra de AXION) · " + esc(elegida.proyecto_declarado) : elegida.obra) +
+        (elegida.unidad ? ' · unidad ' + esc(elegida.unidad) : '') + '</p>' +
+        '<p class="mas"><b>Descripción</b><br>' + esc(elegida.descripcion || "—") + '</p>' +
+        '<p class="mas"><b>Resultado / seguimiento</b><br>' + esc(elegida.resultado || "—") + '</p>' +
+        (elegida.asignado ? '<p class="mas"><b>Asignado a</b> ' + esc(elegida.asignado) + '</p>' : '') +
+        '</div>';
+    }
+
+    if (!sel.length) {
+      h += '<div class="tarjeta"><p class="mas">Ninguna incidencia con ese filtro</p></div>';
+    }
+    return h + '</div>';
+  },
+
+  conectar: function () {
+    var self = this;
+    document.querySelectorAll("#hoja tr[data-inc]").forEach(function (el) {
+      var abrir = function () {
+        var id = el.getAttribute("data-inc");
+        self._abierto = (self._abierto === id) ? "" : id;
+        pintar();
+      };
+      el.addEventListener("click", abrir);
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); }
+      });
+    });
+    document.querySelectorAll("#hoja .st-cerrar").forEach(function (el) {
+      el.addEventListener("click", function () { self._abierto = ""; pintar(); });
+    });
+    var filtrar = function (v) { self._estado = v; self._abierto = ""; pintar(); };
+    document.querySelectorAll("#hoja [data-est]").forEach(function (el) {
+      el.addEventListener("click", function () { filtrar(el.getAttribute("data-est") || ""); });
+    });
+    document.querySelectorAll("#hoja [data-est-tarj]").forEach(function (el) {
+      var f = function () {
+        var v = el.getAttribute("data-est-tarj");
+        filtrar(self._estado === v ? "" : v);
+      };
+      el.addEventListener("click", f);
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); f(); }
+      });
+    });
+    document.querySelectorAll("#hoja [data-pri]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._prioridad = el.getAttribute("data-pri") || "";
+        self._abierto = "";
+        pintar();
+      });
+    });
+    var b = document.getElementById("at-busca");
+    if (b) {
+      b.addEventListener("input", function () {
+        self._busca = b.value;
+        self._abierto = "";
+        var pos = b.selectionStart;
+        pintar();
+        var n = document.getElementById("at-busca");
+        if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+  }
+};
+</script>
+</body>
+</html>

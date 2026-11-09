@@ -1,0 +1,108 @@
+{
+  "AXION/User": {
+    "motivo": "Usuarios del sistema, no datos de negocio.",
+    "decidido": "2026-07-30",
+    "revisar": "no"
+  },
+  "AXION/Resource": {
+    "motivo": "Enlaces y documentos de apoyo del propio AXION.",
+    "decidido": "2026-07-30",
+    "revisar": "no"
+  },
+  "AXION/Proforma": {
+    "motivo": "Solo 3 registros.",
+    "decidido": "2026-07-30",
+    "revisar": "cuando pase de 30 registros"
+  },
+  "AXION/Promotion": {
+    "motivo": "Solo 4 registros, y el campo de promoción aplicada en las ventas está vacío:",
+    "decidido": "2026-07-30",
+    "revisar": "cuando las ventas registren la promoción aplicada"
+  },
+  "AXION/Ingreso": {
+    "motivo": "2 registros y sin campo de proyecto.",
+    "decidido": "2026-07-30",
+    "revisar": "agosto 2026"
+  },
+  "AXION/Property": {
+    "motivo": "NO se conecta como fuente de cifras, y el motivo es lo importante:",
+    "decidido": "2026-08-01",
+    "revisar": "si Habitat unifica el precio en una sola tabla, o confirma cuál manda"
+  },
+  "AXION/KPI": {
+    "motivo": "NO es un descarte:",
+    "decidido": "2026-08-01",
+    "revisar": "al terminar la revisión de las 13 obras"
+  },
+  "AXION/Advisor": {
+    "motivo": "Trae visitas y agendas por asesor, mes a mes — el embudo comercial antes de la venta.",
+    "decidido": "2026-08-01",
+    "revisar": "al definir el alcance de Fase 2"
+  },
+  "AXION/Moroso": {
+    "motivo": "Son 13 registros con las NOTAS DE GESTIÓN de cobranza —'ya abonó, confirmar con Administración'—, no con cifras de carte",
+    "decidido": "2026-08-01",
+    "revisar": "si Habitat pide el módulo de seguimiento de cobranza"
+  },
+  "Excel/cabidas": {
+    "motivo": "SE LEEN DESDE EL 30-AGO-2026 y ya no estan descartados:",
+    "decidido": "2026-08-30",
+    "revisar": "cuando alguno de esos terrenos se compre y pase a ser obra en AXION: ahi se puede comparar lo proyectado contra lo ejecutado"
+  },
+  "Excel/gastos_2026-07-22.xls": {
+    "motivo": "SI se lee (src/exports_axion.py) pero NO entra al consolidado:",
+    "decidido": "2026-08-01",
+    "revisar": "si aparece un export de una entidad que la API NO sirva"
+  },
+  "Excel/axion_export_2026-07-21.xlsx": {
+    "motivo": "Foto del 21-jul-2026 de cuatro entidades que la API sirve en vivo y mas completas:",
+    "pendiente_para_habitat": "La hoja Stock de Propiedades trae 451 unidades agrupadas en 17 obras (con 18 filas de TOTAL y la obra como fila separadora), y la tabla Unit de la API tiene hoy 434 unidades en 18 obras: 17 unidades mas en el export y una obra menos, AGUIRRE MORALES, que no aparece entre sus separadores. No se resuelve desde el software: hay que preguntarle a Habitat si esas unidades se dieron de baja despues del 21-jul o si falta cargarlas.",
+    "decidido": "2026-08-01",
+    "revisar": "cuando Habitat responda por las 17 unidades de diferencia"
+  },
+  "AXION/Gasto": {
+    "motivo": "NO es el gasto del negocio.",
+    "decidido": "2026-08-13",
+    "revisar": "si Habitat vuelve a cargar gastos ahí, o si el módulo de costos que pide prompt_modulo_costos_gastos.md se construye sobre esta tabla en vez de sobre MovimientoGasto"
+  },
+  "AXION/Proveedor": {
+    "motivo": "cada OrdenCompra trae su proveedor EMBEBIDO (ruc, empresa, banco, cuenta); leer la tabla aparte duplicaría la misma data",
+    "decidido": "2026-08-18",
+    "revisar": "si la orden deja de embeber al proveedor"
+  },
+  "AXION/Material": {
+    "motivo": "catálogo de materiales (340 filas) con precio_min y precio_max EN CERO en todas:",
+    "decidido": "2026-08-18",
+    "revisar": "cuando Habitat cargue precios"
+  },
+  "AXION/Inventory": {
+    "motivo": "0 registros al 18-ago-2026.",
+    "decidido": "2026-08-18",
+    "revisar": "cuando tenga registros"
+  },
+  "AXION/Almacen": {
+    "motivo": "0 registros al 18-ago-2026.",
+    "decidido": "2026-08-18",
+    "revisar": "cuando tenga registros"
+  },
+  "AXION/Campaign": {
+    "motivo": "0 registros al 18-ago-2026.",
+    "decidido": "2026-08-18",
+    "revisar": "cuando tenga registros"
+  },
+  "AXION/Trabajador": {
+    "motivo": "Ficha de personal con DNI, cuenta de banco y sueldo de cada trabajador.",
+    "decidido": "2026-10-19",
+    "revisar": "no"
+  },
+  "AXION/Colaborador": {
+    "motivo": "Ficha de personal con DNI, domicilio, estado civil, hijos y sueldo.",
+    "decidido": "2026-10-19",
+    "revisar": "no"
+  },
+  "AXION/SocialMediaMetric": {
+    "motivo": "1 fila (TikTok, octubre) que se contradice con MarketingKPI:",
+    "decidido": "2026-10-19",
+    "revisar": "cuando SocialMediaMetric tenga más de una plataforma o mes"
+  }
+}

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Contratos</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "contratos",
+  nombre: "Contratos",
+  titulo: "Contratos · Pagos a Personal",
+  pregunta: "¿Qué está contratado, con quién, y cuánto se le pagó?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+
+  _abierto: "",
+  _busca: "",
+  _estado: "",
+
+  pintar: function (M, D) {
+    var P = (D || {}).pagos_personal || {};
+    if (!P.hay) {
+      return '<div class="d-lienzo"><div class="tarjeta">' +
+        '<span class="overline">Pagos a Personal</span>' +
+        '<p class="mas">' + esc(P.motivo || "sin partidas publicadas") +
+        ' · Obra</p></div></div>';
+    }
+    var bus = (this._busca || "").toUpperCase();
+    var est = this._estado, abierto = this._abierto;
+
+    var visto = function (p) {
+      return (p.partidas || []).filter(function (x) {
+        if (est && x.estado !== est) return false;
+        if (!bus) return true;
+        return [p.proyecto, x.partida, x.contratista].some(function (v) {
+          return String(v || "").toUpperCase().indexOf(bus) >= 0; });
+      });
+    };
+    var suma = function (xs, k) {
+      return xs.reduce(function (a, x) { return a + (x[k] || 0); }, 0); };
+
+    var tot = 0, pag = 0, nPart = 0, nProy = 0, nObs = 0;
+    (P.proyectos || []).forEach(function (p) {
+      var xs = visto(p);
+      if (!xs.length) return;
+      nProy++; nPart += xs.length;
+      tot += suma(xs, "total"); pag += suma(xs, "pagado");
+      xs.forEach(function (x) { if ((x.obs || []).length) nObs++; });
+    });
+
+    var h = '<div class="d-lienzo">';
+
+    h += '<div class="rejilla-4">' +
+      '<div class="tarjeta"><span class="overline">Total general</span>' +
+      '<div class="cifra-g">' + solesM(tot) + '</div>' +
+      '<p class="mas">' + soles(tot) + ' · ' + ent(nPart) + (nPart === 1 ? ' partida' : ' partidas') +
+      ' en ' + ent(nProy) + (nProy === 1 ? ' proyecto' : ' proyectos') + '</p></div>' +
+      '<div class="tarjeta"><span class="overline">Acumulado</span>' +
+      '<div class="cifra-g">' + solesM(pag) + '</div>' +
+      '<p class="mas">' + soles(pag) + ' · ' + (tot ? fmt1(100 * pag / tot) : '0.0') + '% del total</p></div>' +
+      '<div class="tarjeta"><span class="overline">Saldo</span>' +
+      '<div class="cifra-g">' + solesM(tot - pag) + '</div>' +
+      '<p class="mas">' + soles(tot - pag) + ' · total − acumulado</p></div>' +
+      '<div class="tarjeta"><span class="overline">No cuadran</span>' +
+      '<div class="cifra-g">' + ent(nObs) + '</div>' +
+      '<p class="mas">' + (nObs === 1 ? 'partida' : 'partidas') + ' con pagos que no cierran · Obra</p></div>' +
+      '</div>';
+
+    h += '<div class="st-barra">' +
+      '<div class="bi-tot"><b>' + ent(nPart) + '</b> partidas' +
+      '<span class="st-sep">' + ent(nProy) + ' proyectos</span></div>' +
+      '<label class="st-campo">Buscar<input id="co-busca" type="search" ' +
+      'placeholder="proyecto, partida, contratista…" value="' + esc(this._busca || "") + '"></label>' +
+      '<div class="st-tipos">' +
+        '<button type="button" class="st-pill' + (est ? '' : ' st-pill-on') +
+        '" data-est="">Todos</button>' +
+        (P.estados || []).map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (est === x ? ' st-pill-on' : '') + '" data-est="' + esc(x) + '">' +
+            esc(x) + '</button>';
+        }).join("") +
+      '</div></div>';
+
+    h += '<div class="st-grid">';
+    (P.proyectos || []).forEach(function (p, i) {
+      var xs = visto(p);
+      if (!xs.length) return;
+      var t = suma(xs, "total"), a = suma(xs, "pagado");
+      var id = "c" + i, esta = (abierto === id);
+      h += '<div class="st-tarj' + (esta ? ' st-on' : '') + '" data-obra="' + id + '" ' +
+        'tabindex="0" role="button" aria-expanded="' + (esta ? 'true' : 'false') + '">' +
+        '<div class="st-nom">' + esc(p.proyecto) +
+          '<span class="st-tipo">' + esc(p.tipo || "sin proyecto en AXION · Obra") + '</span></div>' +
+        '<div class="st-libres"><b>' + ent(xs.length) + '</b> ' +
+          (xs.length === 1 ? 'partida' : 'partidas') + '</div>' +
+        '<div class="st-rango">total ' + soles(t) + '</div>' +
+        '<div class="st-rango st-chico">acumulado ' + soles(a) + ' · saldo ' + soles(t - a) + '</div>' +
+        '<div class="st-ver">' + (esta ? 'Cerrar' : 'Ver los pagos') + '</div>' +
+        '</div>';
+    });
+    h += '</div>';
+
+    /* 4 · EL PROYECTO ABIERTO: cada partida y sus pagos, como en AXION */
+    var elegido = null;
+    (P.proyectos || []).forEach(function (p, i) { if (abierto === "c" + i) elegido = p; });
+    if (elegido) {
+      var xs = visto(elegido);
+      var t = suma(xs, "total"), a = suma(xs, "pagado");
+      h += '<div class="tarjeta st-lista">' +
+        '<button type="button" class="st-cerrar" aria-label="Cerrar">✕</button>' +
+        '<span class="overline">' + esc(elegido.proyecto) +
+        '<span class="st-cuenta">' + ent(xs.length) + (xs.length === 1 ? ' partida' : ' partidas') +
+        '</span></span>' +
+        '<div class="pp-resumen"><span>Total general <b>' + soles(t) + '</b></span>' +
+        '<span>Acumulado <b>' + soles(a) + '</b></span>' +
+        '<span>Saldo <b>' + soles(t - a) + '</b></span></div>';
+      xs.forEach(function (x) {
+        h += '<div class="pp-part"><div class="pp-cab">' +
+          '<div class="pp-nom"><b>' + esc(x.partida) + '</b>' +
+          '<span>' + esc(x.contratista) + ' · ' + esc(x.estado) + '</span></div>' +
+          '<div class="pp-cifras"><span>Monto total <b>' + soles(x.total) + '</b></span>' +
+          '<span>Acumulado <b>' + soles(x.pagado) + '</b></span>' +
+          '<span>Saldo <b' + (x.saldo < 0 ? ' class="rojo"' : '') + '>' + soles(x.saldo) + '</b></span></div>' +
+          ((x.obs || []).length ? '<div class="pp-obs">' + x.obs.map(esc).join(' · ') + ' · Obra</div>' : '') +
+          '</div>';
+        if ((x.pagos || []).length) {
+          h += '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+            '<th>Fecha</th><th class="num">P. anterior</th><th class="num">P. actual</th>' +
+            '<th class="num">P. acumulado</th><th class="num">Saldo</th></tr></thead><tbody>' +
+            x.pagos.map(function (q) {
+              var n = function (v) { return (v === null || v === undefined) ? '—' : soles(v); };
+              return '<tr><td>' + esc(q[0] || '—') + '</td><td class="num">' + n(q[1]) +
+                '</td><td class="num"><b>' + n(q[2]) + '</b></td><td class="num">' + n(q[3]) +
+                '</td><td class="num">' + n(q[4]) + '</td></tr>';
+            }).join("") + '</tbody></table></div>';
+        } else {
+          h += '<p class="mas pp-sin">sin pagos</p>';
+        }
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    if (!nPart) {
+      h += '<div class="tarjeta"><p class="mas">Ninguna partida con ese filtro</p></div>';
+    }
+    return h + '</div>';
+  },
+
+  conectar: function () { conectarObra(this, "co-busca"); }
+};
+</script>
+</body>
+</html>

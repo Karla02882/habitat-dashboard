@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Clientes</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "clientes",
+  nombre: "Clientes",
+  titulo: "Clientes de Kommo",
+  pregunta: "¿A quién llamar hoy?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+  fuentes: ["KOMMO"],
+
+  _datos: null,
+  _pedido: false,
+  _marca: null,
+  _error: "",
+  _busca: "",
+  _asesor: "",
+  _proyecto: "",
+  _LA: [],
+  _LP: [],
+
+  SEG: [
+    {k: "calificados", p: "Calificados sin cerrar", chip: "★"},
+    {k: "visitaron", p: "Visitaron y no compraron", chip: "⌂"},
+    {k: "tareas", p: "Tarea vencida", chip: "!"},
+    {k: "nunca", p: "Nunca llamados", chip: "☎"},
+    {k: "frios", p: "Sin contacto hace tiempo", chip: "❄"},
+    {k: "desestimados", p: "Desestimados recientes", chip: "↺"},
+    {k: "compraron", p: "Ya compraron", chip: "✓"},
+    {k: "sintel", p: "Abiertos sin teléfono", chip: "∅"}
+  ],
+  PRIMERO: ["calificados", "visitaron", "tareas", "nunca", "frios"],
+
+  _sub: function (k, C) {
+    return {
+      calificados: "en Seguimiento, Visita o Pre cierre",
+      visitaron: "con visita pasada · sin Vendido",
+      tareas: "la próxima tarea en Kommo ya venció",
+      nunca: "abiertos · sin llamada, seguimiento ni visita",
+      frios: "abiertos · último contacto hace " + C.dias_frio + "+ días",
+      desestimados: "últimos " + C.dias_desestimado + " días · sin " +
+        (C.sin_llamada || []).join(" ni "),
+      compraron: "en Vendido · referidos",
+      sintel: "el contacto no tiene número · Comercial"
+    }[k] || "";
+  },
+
+  _pedir: function () {
+    var self = this;
+    this._pedido = true;
+    fetch("/clientes", {cache: "no-store"})
+      .then(function (r) {
+        if (r.status === 403) throw new Error("solo el administrador ve esta hoja");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (j) {
+        self._datos = j; self._error = "";
+        if (window.HOJA === self) pintar();
+      })
+      .catch(function (e) {
+        self._error = (e && e.message) || String(e);
+        if (window.HOJA === self) pintar();
+      });
+  },
+
+  _norm: function (s) {
+    return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+  },
+
+  _fdm: function (s) {
+    var p = String(s || "").split("-");
+    return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0].slice(2) : String(s || "");
+  },
+
+  _proy: function (r) { return r.proyecto || "(sin proyecto)"; },
+
+  _base: function () {
+    var a = this._asesor, p = this._proyecto, self = this;
+    return ((this._datos || {}).filas || []).filter(function (r) {
+      return (!a || r.asesor === a) && (!p || self._proy(r) === p);
+    });
+  },
+
+  _primerSeg: function (r) {
+    for (var i = 0; i < this.SEG.length; i++)
+      if (r.seg.indexOf(this.SEG[i].k) >= 0) return this.SEG[i].k;
+    return "";
+  },
+
+  /* Quién va primero ADENTRO de cada grupo. */
+  _orden: function (k, a, b) {
+    var ET = {"PRE CIERRE": 0, "VISITA": 1, "SEGUIMIENTO": 2};
+    var et = function (x) { return (x.etapa in ET) ? ET[x.etapa] : 9; };
+    var desc = function (x, y) { return String(y || "").localeCompare(String(x || "")); };
+    var nd = function (x) { return (x === null || x === undefined) ? 0 : x; };
+    if (k === "calificados") return (et(a) - et(b)) || (nd(a.dias) - nd(b.dias));
+    if (k === "visitaron") return desc(a.visita, b.visita);
+    if (k === "tareas") return String(a.tarea).localeCompare(String(b.tarea));
+    if (k === "frios") return nd(a.dias) - nd(b.dias);
+    if (k === "desestimados" || k === "compraron") return desc(a.cerrado, b.cerrado);
+    return desc(a.creado, b.creado);
+  },
+
+  _prioridad: function (filas, resto) {
+    var self = this, P = this.PRIMERO;
+    var grupos = P.map(function () { return []; }), sobra = [];
+    filas.forEach(function (r) {
+      if (!r.abierto) return;
+      for (var i = 0; i < P.length; i++) {
+        if (r.seg.indexOf(P[i]) >= 0) { grupos[i].push(r); return; }
+      }
+      sobra.push(r);
+    });
+    var out = [];
+    grupos.forEach(function (g, i) {
+      g.sort(function (x, y) { return self._orden(P[i], x, y); });
+      out = out.concat(g);
+    });
+    if (resto) {
+      sobra.sort(function (x, y) { return self._orden("", x, y); });
+      out = out.concat(sobra);
+    }
+    return out;
+  },
+
+  _porque: function (r, k) {
+    k = k || this._primerSeg(r);
+    var f = this._fdm;
+    if (k === "calificados") return "Calificado";
+    if (k === "visitaron") return "Visitó el " + f(r.visita);
+    if (k === "tareas") return "Tarea del " + f(r.tarea);
+    if (k === "nunca") return "Llegó el " + f(r.creado);
+    if (k === "frios") return ent(r.dias) + " días sin contacto";
+    if (k === "desestimados") return "Desestimado el " + f(r.cerrado);
+    if (k === "compraron") return "Compró";
+    if (k === "sintel") return "Sin teléfono";
+    return "Llegó el " + f(r.creado);
+  },
+
+  _telHtml: function (r, enVentana) {
+    if (!r.tel) return enVentana ? 'No existe' : '<span class="cl-sin">sin teléfono</span>';
+    return '<a class="cl-tel" href="tel:' + esc(r.marcar) + '">' + esc(r.tel) + '</a>' +
+      (r.wa ? '<a class="cl-wa" href="https://wa.me/' + esc(r.wa) +
+        '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+      ((r.mas_tel || []).length ? '<span class="ob-sub"> · ' +
+        r.mas_tel.map(esc).join(' · ') + '</span>' : '');
+  },
+
+  _tabla: function (filas, tope, k, enVentana) {
+    var self = this, NE = "No existe";
+    var cab = '<div class="envoltura-tabla"><table class="datos cl-tabla"><thead><tr>' +
+      '<th>Cliente</th><th>Teléfono</th><th>Etapa</th><th>Asesor</th>' +
+      '<th>Proyecto</th><th class="num">Último contacto</th><th>Por qué</th></tr></thead><tbody>';
+    if (!filas.length) {
+      if (!enVentana) return '<p class="mas">0 leads en este corte</p>';
+      return cab + '<tr><td class="obra">' + NE + '</td><td>' + NE + '</td><td>' + NE +
+        '</td><td>' + NE + '</td><td>' + NE + '</td><td class="num">' + NE + '</td><td>' +
+        NE + '</td></tr></tbody></table></div>';
+    }
+    var h = cab;
+    filas.slice(0, tope).forEach(function (r) {
+      h += '<tr><td class="obra">' +
+        (r.nombre ? '<span data-literal="nombre tal como está en Kommo">' + esc(r.nombre) + '</span>'
+                  : (enVentana ? NE : '<span class="cl-sin">sin nombre</span>')) + '</td>' +
+        '<td>' + self._telHtml(r, enVentana) + '</td>' +
+        '<td>' + (enVentana && !r.etapa ? NE : esc(r.etapa)) +
+          (r.motivo ? '<span class="ob-sub"> · ' + esc(r.motivo) + '</span>' : '') + '</td>' +
+        '<td>' + (enVentana && !r.asesor ? NE : esc(r.asesor)) + '</td>' +
+        '<td>' + esc(r.proyecto || (enVentana ? NE : '—')) + '</td>' +
+        '<td class="num" data-orden="' + esc(r.ultimo || '') + '">' +
+          (r.ultimo ? self._fdm(r.ultimo) : (enVentana ? NE : 'nunca')) +
+          '<span class="ob-sub">' + (r.ultimo ? ent(r.dias) + ' d · ' : '') +
+          ent(r.seguimientos) + (r.seguimientos === 1 ? ' seguimiento' : ' seguimientos') +
+          '</span></td>' +
+        '<td>' + esc(self._porque(r, k)) + '</td></tr>';
+    });
+    if (enVentana && filas.length > tope)
+      h += '<tr class="total"><td class="obra" colspan="7">TOTAL · ' + ent(filas.length) +
+        ' leads · se muestran ' + ent(tope) + '</td></tr>';
+    h += '</tbody></table></div>';
+    if (!enVentana && filas.length > tope)
+      h += '<p class="mas">' + ent(tope) + ' de ' + ent(filas.length) + ' · el resto con el buscador</p>';
+    return h;
+  },
+
+  _opciones: function (cuenta, elegido) {
+    var ks = Object.keys(cuenta).sort(function (a, b) { return a.localeCompare(b); });
+    return '<option value="">Todos</option>' + ks.map(function (k) {
+      return '<option value="' + esc(k) + '"' + (k === elegido ? ' selected' : '') + '>' +
+        esc(k) + ' · ' + ent(cuenta[k]) + '</option>';
+    }).join('');
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var marca = (typeof D !== "undefined" && D) ? String(D.publicado || D.generado || "") : "";
+    if (!this._pedido || this._marca !== marca) { this._marca = marca; this._pedir(); }
+    if (this._error) {
+      return '<div class="d-lienzo"><div class="d-carta"><span class="overline">Clientes</span>' +
+        '<p class="mas">' + esc(this._error) + '</p></div></div>';
+    }
+    var C = this._datos;
+    if (!C) {
+      return '<div class="d-lienzo"><div class="d-carta"><span class="overline">Clientes</span>' +
+        '<p class="mas">cargando la lista de Kommo…</p></div></div>';
+    }
+    if (!C.filas) {
+      return '<div class="d-lienzo"><div class="d-carta"><span class="overline">Clientes</span>' +
+        '<p class="mas">' + esc(C.motivo || "sin lista de clientes") + '</p></div></div>';
+    }
+
+    var cuA = {}, cuP = {};
+    C.filas.forEach(function (r) {
+      if (!r.abierto) return;
+      cuA[r.asesor] = (cuA[r.asesor] || 0) + 1;
+      cuP[self._proy(r)] = (cuP[self._proy(r)] || 0) + 1;
+    });
+    if (this._asesor && !cuA[this._asesor]) cuA[this._asesor] = 0;
+    if (this._proyecto && !cuP[this._proyecto]) cuP[this._proyecto] = 0;
+
+    var base = this._base();
+    var abiertos = base.filter(function (r) { return r.abierto; }).length;
+
+    var h = '<div class="d-lienzo">';
+    h += '<div class="st-barra">' +
+      '<label class="st-campo">Buscar<input id="cl-busca" type="search" ' +
+        'placeholder="nombre, teléfono, proyecto…" value="' + esc(this._busca) + '"></label>' +
+      '<label class="st-campo">Asesor<select id="cl-asesor" class="cl-sel">' +
+        this._opciones(cuA, this._asesor) + '</select></label>' +
+      '<label class="st-campo">Proyecto<select id="cl-proyecto" class="cl-sel">' +
+        this._opciones(cuP, this._proyecto) + '</select></label>' +
+      '<span class="cl-meta">' + esc(C.embudo) + ' · ' + ent(C.leads) +
+        ' leads · Kommo al ' + esc(C.cuando) + '</span></div>';
+
+    var cuenta = {};
+    this.SEG.forEach(function (s) { cuenta[s.k] = 0; });
+    base.forEach(function (r) {
+      r.seg.forEach(function (k) { if (k in cuenta) cuenta[k]++; });
+    });
+    var sobreAbiertos = {calificados: 1, tareas: 1, nunca: 1, frios: 1, sintel: 1};
+    h += '<div class="rejilla-4" style="margin-bottom:var(--e4)">';
+    this.SEG.forEach(function (s) {
+      h += '<div class="d-carta d-abrible abrible" data-abre="cl-s-' + s.k +
+        '" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">' + s.chip + '</span>' +
+        '<span class="d-preg">' + esc(s.p) + '</span></div>' +
+        '<div class="d-cifra">' + ent(cuenta[s.k]) + '</div>' +
+        '<div class="d-exacta">' + esc(self._sub(s.k, C)) + '</div>' +
+        '<div class="d-pie">' + ((s.k in sobreAbiertos && abiertos)
+          ? fmt1(100 * cuenta[s.k] / abiertos) + '% de ' + ent(abiertos) + ' abiertos'
+          : 'ver la lista') + '</div></div>';
+    });
+    h += '</div>';
+    this.SEG.forEach(function (s) {
+      h += '<div class="detalle" id="det-cl-s-' + s.k + '"></div>';
+    });
+
+    var lista, tit, sub;
+    if (this._busca.trim()) {
+      var q = this._norm(this._busca.trim()), dig = this._busca.replace(/\D/g, "");
+      lista = base.filter(function (r) {
+        if (dig.length >= 4 && String(r.marcar || "").replace(/\D/g, "").indexOf(dig) >= 0) return true;
+        return self._norm([r.nombre, r.proyecto, r.asesor, r.campana, r.etapa, r.correo]
+          .join(" ")).indexOf(q) >= 0;
+      }).sort(function (x, y) { return String(y.creado).localeCompare(String(x.creado)); });
+      tit = "Búsqueda";
+      sub = ent(lista.length) + " leads · de todas las etapas";
+      h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">' + tit +
+        '</h3><p class="d-sub">' + sub + '</p>' + this._tabla(lista, 100, null) + '</div>';
+    } else {
+      lista = this._prioridad(base, false);
+      sub = ent(lista.length) + " abiertos · calificados › visitaron › tarea vencida › nunca llamados › sin contacto";
+      h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">Llamar primero' +
+        '</h3><p class="d-sub">' + sub + '</p>' + this._tabla(lista, 25, null) + '</div>';
+    }
+
+    var porA = {};
+    base.forEach(function (r) {
+      if (!r.abierto) return;
+      var a = porA[r.asesor] || (porA[r.asesor] = {n: 0, calificados: 0, nunca: 0, frios: 0, tareas: 0});
+      a.n++;
+      r.seg.forEach(function (k) { if (k in a) a[k]++; });
+    });
+    this._LA = Object.keys(porA).sort(function (x, y) { return porA[y].n - porA[x].n; });
+    h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">Cartera abierta por asesor</h3>' +
+      '<p class="d-sub">' + ent(abiertos) + ' abiertos · ' + ent(this._LA.length) + ' asesores</p>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Asesor</th>' +
+      '<th class="num">Abiertos</th><th class="num">Calificados</th><th class="num">Nunca llamados</th>' +
+      '<th class="num">Sin contacto ' + C.dias_frio + '+ días</th><th class="num">Tarea vencida</th>' +
+      '</tr></thead><tbody>' +
+      this._LA.map(function (a, i) {
+        var x = porA[a];
+        return '<tr class="abrible" data-abre="cl-a-' + i + '" aria-expanded="false" tabindex="0" role="button">' +
+          '<td class="obra">' + esc(a) + '</td><td class="num">' + ent(x.n) + '</td>' +
+          '<td class="num">' + ent(x.calificados) + '</td><td class="num">' + ent(x.nunca) + '</td>' +
+          '<td class="num">' + ent(x.frios) + '</td><td class="num">' + ent(x.tareas) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+    this._LA.forEach(function (a, i) {
+      h += '<div class="detalle" id="det-cl-a-' + i + '"></div>';
+    });
+
+    var porP = {};
+    base.forEach(function (r) {
+      if (!r.abierto) return;
+      var p = porP[self._proy(r)] || (porP[self._proy(r)] = {n: 0, calificados: 0, visitaron: 0, nunca: 0});
+      p.n++;
+      r.seg.forEach(function (k) { if (k in p) p[k]++; });
+    });
+    this._LP = Object.keys(porP).filter(function (p) { return porP[p].n > 0; })
+      .sort(function (x, y) { return porP[y].n - porP[x].n; });
+    var topeP = 15;
+    h += '<div class="d-carta"><h3 class="d-tit">Demanda abierta por proyecto</h3>' +
+      '<p class="d-sub">' + ent(Math.min(topeP, this._LP.length)) + ' de ' + ent(this._LP.length) +
+      ' proyectos de interés · por leads abiertos</p>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Proyecto</th>' +
+      '<th class="num">Abiertos</th><th class="num">Calificados</th><th class="num">Visitaron</th>' +
+      '<th class="num">Nunca llamados</th></tr></thead><tbody>' +
+      this._LP.slice(0, topeP).map(function (p, i) {
+        var x = porP[p];
+        return '<tr class="abrible" data-abre="cl-p-' + i + '" aria-expanded="false" tabindex="0" role="button">' +
+          '<td class="obra">' + esc(p) + '</td><td class="num">' + ent(x.n) + '</td>' +
+          '<td class="num">' + ent(x.calificados) + '</td><td class="num">' + ent(x.visitaron) + '</td>' +
+          '<td class="num">' + ent(x.nunca) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+    this._LP.slice(0, topeP).forEach(function (p, i) {
+      h += '<div class="detalle" id="det-cl-p-' + i + '"></div>';
+    });
+
+    return h + '</div>';
+  },
+
+  detalle: function (id) {
+    id = String(id);
+    if (id.indexOf("cl-") !== 0 || !this._datos || !this._datos.filas) return null;
+    var self = this, base = this._base(), filas, tit, k = null;
+    if (id.indexOf("cl-s-") === 0) {
+      k = id.slice(5);
+      var s = this.SEG.filter(function (x) { return x.k === k; })[0];
+      filas = base.filter(function (r) { return r.seg.indexOf(k) >= 0; });
+      filas.sort(function (x, y) { return self._orden(k, x, y); });
+      tit = s ? s.p : k;
+    } else if (id.indexOf("cl-a-") === 0) {
+      var a = this._LA[+id.slice(5)];
+      filas = this._prioridad(base.filter(function (r) { return r.asesor === a; }), true);
+      tit = 'Cartera abierta · ' + a;
+    } else if (id.indexOf("cl-p-") === 0) {
+      var p = this._LP[+id.slice(5)];
+      filas = this._prioridad(base.filter(function (r) { return self._proy(r) === p; }), true);
+      tit = 'Demanda abierta · ' + p;
+    } else {
+      return null;
+    }
+    return '<button class="cerrar">Cerrar</button><h3>' + esc(tit) + '</h3>' +
+      this._tabla(filas, 300, k, true);
+  },
+
+  conectar: function () {
+    var self = this;
+    var b = document.getElementById("cl-busca");
+    if (b) {
+      b.addEventListener("input", function () {
+        self._busca = b.value;
+        var pos = b.selectionStart;
+        pintar();
+        var n = document.getElementById("cl-busca");
+        if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+    ["asesor", "proyecto"].forEach(function (q) {
+      var s = document.getElementById("cl-" + q);
+      if (s) s.addEventListener("change", function () { self["_" + q] = s.value; pintar(); });
+    });
+  }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,90 @@
+{
+ "anio": 2025,
+ "fuente": "REPORTE DE VENTAS 2025.xlsx · total por hoja",
+ "meses": {
+  "1": {
+   "mes": 1,
+   "nombre": "Enero",
+   "monto": 831702.3,
+   "celda": "H46",
+   "roto": false
+  },
+  "2": {
+   "mes": 2,
+   "nombre": "Febrero",
+   "monto": 2238498.63,
+   "celda": "H31",
+   "roto": false
+  },
+  "3": {
+   "mes": 3,
+   "nombre": "Marzo",
+   "monto": 380117.0,
+   "celda": "H24",
+   "roto": false
+  },
+  "4": {
+   "mes": 4,
+   "nombre": "Abril",
+   "monto": 261000.0,
+   "celda": "H28",
+   "roto": false
+  },
+  "5": {
+   "mes": 5,
+   "nombre": "Mayo",
+   "monto": 527600.0,
+   "celda": "H33",
+   "roto": false
+  },
+  "6": {
+   "mes": 6,
+   "nombre": "Junio",
+   "monto": 894109.1,
+   "celda": "H36",
+   "roto": false
+  },
+  "7": {
+   "mes": 7,
+   "nombre": "Julio",
+   "monto": null,
+   "celda": "",
+   "roto": true
+  },
+  "8": {
+   "mes": 8,
+   "nombre": "Agosto",
+   "monto": 806713.0,
+   "celda": "H23",
+   "roto": false
+  },
+  "9": {
+   "mes": 9,
+   "nombre": "Septiembre",
+   "monto": 561900.0,
+   "celda": "H23",
+   "roto": false
+  },
+  "10": {
+   "mes": 10,
+   "nombre": "Octubre",
+   "monto": 1432000.0,
+   "celda": "H26",
+   "roto": false
+  },
+  "11": {
+   "mes": 11,
+   "nombre": "Noviembre",
+   "monto": 682000.0,
+   "celda": "H31",
+   "roto": false
+  },
+  "12": {
+   "mes": 12,
+   "nombre": "Diciembre",
+   "monto": 848416.0,
+   "celda": "H34",
+   "roto": false
+  }
+ }
+}

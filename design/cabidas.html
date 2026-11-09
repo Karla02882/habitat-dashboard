@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cabidas · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+function cbProyectar(e) {
+  var n = function (k, porDefecto) {
+    var v = e[k];
+    if (v === null || v === undefined || v === "") return porDefecto;
+    v = Number(v);
+    return isNaN(v) ? porDefecto : v;
+  };
+  var terreno = n("area_terreno_m2", 0), pisos = n("pisos", 0), sot = n("sotanos", 0);
+  var r = {};
+  r.area_util_piso = terreno - n("descuento_area_util_m2", 0);
+  r.area_vendible_piso = r.area_util_piso - n("circulacion_por_piso_m2", 0);
+  r.area_vendible = r.area_vendible_piso * pisos;
+  var prom = n("area_promedio_depto_m2", 0);
+  r.departamentos_estimados = prom > 0 ? Math.floor(r.area_vendible / prom) : null;
+  r.area_techada_pisos = r.area_util_piso * pisos;
+  r.area_sotanos = sot * terreno;
+  r.area_techada = r.area_techada_pisos + r.area_sotanos;
+  var m2e = n("m2_por_estacionamiento", 0);
+  r.estacionamientos_posibles = m2e > 0 ? Math.floor(r.area_sotanos / m2e) : 0;
+  r.estacionamientos = n("estacionamientos_que_se_venden", r.estacionamientos_posibles);
+  r.venta_departamentos = r.area_vendible * n("precio_venta_m2", 0);
+  r.venta_estacionamientos = r.estacionamientos * n("precio_estacionamiento", 0);
+  r.ventas = r.venta_departamentos + r.venta_estacionamientos;
+  r.costo_edificacion = r.area_techada_pisos * n("costo_edificacion_m2", 0);
+  r.costo_sotano = r.area_sotanos * n("costo_sotano_m2", 0);
+  r.costo_especialidades = n("especialidades_m2_techado", 0) * r.area_techada;
+  r.costo_gerencia = n("gerencia_pct_ventas", 0) * r.ventas;
+  r.costo_marketing = n("marketing_pct_ventas", 0) * r.ventas;
+  r.utilidad_esperada = n("utilidad_esperada_pct_ventas", 0) * r.ventas;
+  r.area_a_demoler = n("area_a_demoler_m2", terreno);
+  r.costo_demolicion = r.area_a_demoler * n("demolicion_m2", 0);
+  r.costos = r.costo_edificacion + r.costo_sotano + r.costo_especialidades +
+    r.costo_gerencia + r.costo_marketing + r.utilidad_esperada + r.costo_demolicion;
+  r.residual = r.ventas - r.costos;
+  r.residual_m2 = terreno > 0 ? r.residual / terreno : null;
+  r.residual_sobre_ventas = r.ventas > 0 ? r.residual / r.ventas : null;
+  r.precio_pedido = n("precio_pedido", null);
+  r.contingencia = r.precio_pedido === null ? null : r.residual - r.precio_pedido;
+  r.utilidad_pagando_lo_pedido = r.contingencia === null ? null
+    : r.utilidad_esperada + r.contingencia;
+  r.utilidad_pagando_sobre_ventas = (r.utilidad_pagando_lo_pedido === null || !(r.ventas > 0))
+    ? null : r.utilidad_pagando_lo_pedido / r.ventas;
+  r.faltan = [];
+  if (!(terreno > 0)) r.faltan.push("área del terreno");
+  if (!(pisos > 0)) r.faltan.push("pisos");
+  if (!(n("precio_venta_m2", 0) > 0)) r.faltan.push("precio de venta");
+  return r;
+}
+
+var CB_CAMPOS = [
+  {k: "area_terreno_m2", rot: "Área del terreno (m²)", g: "Terreno", def: ""},
+  {k: "precio_pedido", rot: "Precio que piden (USD)", g: "Terreno", def: ""},
+  {k: "area_a_demoler_m2", rot: "Área a demoler (m²)", g: "Terreno", def: "",
+   ph: "= área del terreno"},
+  {k: "pisos", rot: "Pisos", g: "Edificio", def: ""},
+  {k: "sotanos", rot: "Sótanos", g: "Edificio", def: 1},
+  {k: "descuento_area_util_m2", rot: "Descuento de área útil por piso (m²)", g: "Edificio", def: 56},
+  {k: "circulacion_por_piso_m2", rot: "Circulación por piso (m²)", g: "Edificio", def: 26},
+  {k: "area_promedio_depto_m2", rot: "Área promedio por departamento (m²)", g: "Edificio", def: 60},
+  {k: "m2_por_estacionamiento", rot: "m² por estacionamiento", g: "Edificio", def: 35},
+  {k: "estacionamientos_que_se_venden", rot: "Estacionamientos que se venden", g: "Edificio", def: "",
+   ph: "= los que entran en el sótano"},
+  {k: "precio_venta_m2", rot: "Precio de venta (USD/m²)", g: "Venta", def: ""},
+  {k: "precio_estacionamiento", rot: "Precio por estacionamiento (USD)", g: "Venta", def: 12000},
+  {k: "costo_edificacion_m2", rot: "Edificación (USD/m²)", g: "Costos", def: 500},
+  {k: "costo_sotano_m2", rot: "Sótano (USD/m²)", g: "Costos", def: 300},
+  {k: "especialidades_m2_techado", rot: "Especialidades, licencias y adm. (USD/m² techado)", g: "Costos", def: 15},
+  {k: "gerencia_pct_ventas", rot: "Gerencia y dirección (% de ventas)", g: "Costos", def: 4, pct: true},
+  {k: "marketing_pct_ventas", rot: "Marketing y ventas (% de ventas)", g: "Costos", def: 2, pct: true},
+  {k: "utilidad_esperada_pct_ventas", rot: "Utilidad esperada (% de ventas)", g: "Costos", def: 20, pct: true},
+  {k: "demolicion_m2", rot: "Demolición (USD/m²)", g: "Costos", def: 100}
+];
+window.HOJA = {
+  id: "cabidas",
+  nombre: "Cabidas",
+  pregunta: "¿Qué terreno conviene?",
+  fuentes: ["CABIDAS"],
+
+  ventanas: {
+    "cb-terrenos": "ni el período, ni la razón social, ni el proyecto",
+    "cb-conviene": "ni el período, ni la razón social, ni el proyecto",
+    "cb-error": "ni el período, ni la razón social, ni el proyecto",
+    "cb-valle": "ni el período, ni la razón social, ni el proyecto"
+  },
+
+  _usd: function (n) {
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    var s = Math.abs(n).toLocaleString("en-US",
+      {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    return (n < 0 ? "− USD " : "USD ") + s;
+  },
+  _usdM: function (n) {
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    var a = Math.abs(n), s;
+    if (a >= 1e6) s = (a / 1e6).toFixed(2) + "M";
+    else if (a >= 1e3) s = (a / 1e3).toFixed(1) + "K";
+    else s = a.toFixed(0);
+    return (n < 0 ? "− USD " : "USD ") + s;
+  },
+
+  _peBlanco: function () {
+    var o = {};
+    CB_CAMPOS.forEach(function (c) { o[c.k] = String(c.def); });
+    return o;
+  },
+  _peCargar: function (nombre) {
+    var t = (this._terrenosTodos || []).filter(function (x) {
+      return x.nombre === nombre && x.entradas; })[0];
+    if (!t) { this._pe = this._peBlanco(); this._peDe = ""; return; }
+    var o = {};
+    CB_CAMPOS.forEach(function (c) {
+      var v = t.entradas[c.k];
+      if (v === null || v === undefined) { o[c.k] = ""; return; }
+      o[c.k] = String(c.pct ? Math.round(v * 1e6) / 1e4 : v);
+    });
+    this._pe = o; this._peDe = nombre;
+  },
+  _entradas: function () {
+    var st = this._pe || this._peBlanco(), e = {};
+    CB_CAMPOS.forEach(function (c) {
+      var v = String(st[c.k] === undefined ? "" : st[c.k]).trim();
+      if (v === "") { e[c.k] = null; return; }
+      var x = Number(v);
+      e[c.k] = isNaN(x) ? null : (c.pct ? x / 100 : x);
+    });
+    return e;
+  },
+  _proyHtml: function (terrenos) {
+    var self = this;
+    if (!this._pe) this._pe = this._peBlanco();
+    var st = this._pe;
+    var conEntradas = (terrenos || []).filter(function (t) { return !!t.entradas; });
+    var h = '<div class="d-carta cb-proy" id="cb-proy">' +
+      '<h3 class="d-tit">Proyectar un terreno · USD</h3>' +
+      '<div class="pills-emp cb-cargar">';
+    conEntradas.forEach(function (t) {
+      h += '<button type="button" class="pill-emp' + (self._peDe === t.nombre ? ' activa' : '') +
+        '" data-cb-cargar="' + esc(t.nombre) + '">' + esc(t.nombre) + '</button>';
+    });
+    h += '<button type="button" class="pill-emp' + (self._peDe ? '' : ' activa') +
+      '" data-cb-cargar="">En blanco</button></div><div class="cb-form">';
+    ["Terreno", "Edificio", "Venta", "Costos"].forEach(function (g) {
+      h += '<fieldset class="cb-grupo"><legend>' + esc(g) + '</legend>';
+      CB_CAMPOS.filter(function (c) { return c.g === g; }).forEach(function (c) {
+        h += '<label class="cb-campo"><span>' + esc(c.rot) + '</span>' +
+          '<input type="number" step="any" inputmode="decimal" data-cb="' + c.k +
+          '" value="' + esc(String(st[c.k] === undefined ? "" : st[c.k])) + '"' +
+          (c.ph ? ' placeholder="' + esc(c.ph) + '"' : '') + '></label>';
+      });
+      h += '</fieldset>';
+    });
+    return h + '</div><div id="cb-res">' + this._proyRes() + '</div></div>';
+  },
+  _proyRes: function () {
+    var self = this, e = this._entradas(), r = cbProyectar(e);
+    if (r.faltan.length) {
+      return '<p class="linea-meta">Faltan: ' + esc(r.faltan.join(" · ")) + '</p>';
+    }
+    var m2 = function (v) {
+      return v.toLocaleString("en-US", {maximumFractionDigits: 2}) + " m²"; };
+    var nu = function (v) { return v.toLocaleString("en-US", {maximumFractionDigits: 2}); };
+    var u = function (v) { return self._usd(v); };
+    var pc = function (v) { return fmt1(v * 100) + "%"; };
+    var fila = function (con, calc, val, cls, rojo) {
+      return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td class="obra">' + con + '</td>' +
+        '<td>' + calc + '</td><td class="num"' + (rojo ? ' style="color:var(--rojo)"' : '') +
+        '>' + val + '</td></tr>';
+    };
+    var tasa = function (k) { return pc(e[k] || 0) + " de las ventas"; };
+    var est = (e.estacionamientos_que_se_venden === null)
+      ? nu(r.area_sotanos) + " ÷ " + nu(e.m2_por_estacionamiento || 0) : "ingresado";
+    var h = '<div class="envoltura-tabla"><table class="datos cb-tabla"><thead><tr>' +
+      '<th>Concepto</th><th>Cálculo</th><th class="num">Resultado</th></tr></thead><tbody>';
+    h += fila("Área útil por piso", nu(e.area_terreno_m2) + " − " + nu(e.descuento_area_util_m2 || 0), m2(r.area_util_piso));
+    h += fila("Área vendible por piso", nu(r.area_util_piso) + " − " + nu(e.circulacion_por_piso_m2 || 0), m2(r.area_vendible_piso));
+    h += fila("Área vendible", nu(r.area_vendible_piso) + " × " + nu(e.pisos) + " pisos", m2(r.area_vendible));
+    if (r.departamentos_estimados !== null) {
+      h += fila("Departamentos estimados", nu(r.area_vendible) + " ÷ " + nu(e.area_promedio_depto_m2), ent(r.departamentos_estimados));
+    }
+    h += fila("Área techada", nu(r.area_util_piso) + " × " + nu(e.pisos) + " + " +
+      nu(e.sotanos || 0) + " × " + nu(e.area_terreno_m2), m2(r.area_techada));
+    h += fila("Estacionamientos", est, ent(r.estacionamientos));
+    h += fila("Venta de departamentos", nu(r.area_vendible) + " m² × " + u(e.precio_venta_m2), u(r.venta_departamentos));
+    h += fila("Venta de estacionamientos", nu(r.estacionamientos) + " × " + u(e.precio_estacionamiento || 0), u(r.venta_estacionamientos));
+    h += fila("VENTAS PROYECTADAS", "", u(r.ventas), "total");
+    h += fila("Edificación", nu(r.area_techada_pisos) + " m² × " + u(e.costo_edificacion_m2 || 0), u(-r.costo_edificacion));
+    h += fila("Sótano", nu(r.area_sotanos) + " m² × " + u(e.costo_sotano_m2 || 0), u(-r.costo_sotano));
+    h += fila("Especialidades, licencias y adm.", u(e.especialidades_m2_techado || 0) + " × " + nu(r.area_techada) + " m²", u(-r.costo_especialidades));
+    h += fila("Gerencia y dirección", tasa("gerencia_pct_ventas"), u(-r.costo_gerencia));
+    h += fila("Marketing y ventas", tasa("marketing_pct_ventas"), u(-r.costo_marketing));
+    h += fila("Utilidad esperada", tasa("utilidad_esperada_pct_ventas"), u(-r.utilidad_esperada));
+    h += fila("Demolición", nu(r.area_a_demoler) + " m² × " + u(e.demolicion_m2 || 0), u(-r.costo_demolicion));
+    h += fila("SOPORTA PAGAR POR EL TERRENO",
+      u(r.residual_m2) + " por m² · " + pc(r.residual_sobre_ventas || 0) + " de las ventas",
+      u(r.residual), "total", r.residual < 0);
+    if (r.contingencia !== null) {
+      var ok = r.contingencia > 0;
+      h += fila("Precio que piden", "", u(r.precio_pedido));
+      h += fila("DIFERENCIA", '<span class="d-tag ' + (ok ? 'ok' : 'mal') + '">' +
+        (ok ? 'lo soporta' : 'piden de más') + '</span>', u(r.contingencia), "total", !ok);
+      h += fila("Utilidad si se paga lo que piden",
+        pc(r.utilidad_pagando_sobre_ventas || 0) + " de las ventas",
+        u(r.utilidad_pagando_lo_pedido), "", r.utilidad_pagando_lo_pedido < 0);
+    }
+    return h + '</tbody></table></div>';
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var C = D.cabidas || {};
+    var MF = C.multifamiliar_huancayo || {};
+    var terrenos = (MF.terrenos || []).slice();
+    var VA = C.valle_alto || {};
+    var escens = VA.escenarios || [];
+    var hall = C.hallazgos || [];
+
+    this._terrenosTodos = terrenos;
+    if (!terrenos.length && !escens.length) {
+      return '<div class="d-lienzo"><div class="d-kpis">' +
+        '<div class="d-carta"><div class="d-cab"><span class="d-chip">▤</span>' +
+        '<span class="d-preg">¿Qué terreno conviene?</span></div>' +
+        '<div class="d-cifra">—</div>' +
+        '<div class="d-exacta">sin estudios cargados</div>' +
+        '<div class="d-pie">corre scripts/extraer_cabidas.py</div></div></div>' +
+        this._proyHtml([]) + '</div>';
+    }
+
+    terrenos.forEach(function (t) {
+      var c = t.utilidad_esperada_control || {};
+      t._calza = (c.calza !== false);
+      t._conting = t._calza ? t.contingencia
+                            : (c.contingencia_con_el_rotulo);
+      t._residual = t._calza ? t.residual_terreno
+                             : (c.residual_con_el_rotulo);
+      t._delta = t._calza ? 0 : (c.diferencia || 0);
+    });
+    var ordenados = terrenos.slice().sort(function (a, b) {
+      return b._conting - a._conting; });
+    var pasan = terrenos.filter(function (t) { return t._conting > 0; });
+    var mejor = ordenados[0];
+    var conError = terrenos.filter(function (t) { return !t._calza; });
+    var deltaTot = 0, deltaCont = 0;
+    conError.forEach(function (t) {
+      deltaTot += t._delta;
+      deltaCont += (t.contingencia - t._conting);
+    });
+    var pieConviene = !pasan.length ? "ninguno con margen"
+      : (pasan.length === 1 ? "el único con margen"
+         : "el mayor margen de " + ent(pasan.length));
+    var nomError = conError.length <= 2
+      ? conError.map(function (t) { return t.nombre; }).join(" · ")
+      : ent(conError.length) + " terrenos";
+    var areaTot = 0, deptosTot = 0, ventasTot = 0;
+    terrenos.forEach(function (t) {
+      areaTot += t.area_terreno_m2 || 0;
+      deptosTot += t.departamentos || 0;
+      ventasTot += t.ventas_proyectadas || 0;
+    });
+
+    var h = '<div class="d-lienzo">';
+
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-abrible abrible" data-abre="cb-terrenos" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">▤</span><span class="d-preg">¿Cuántos terrenos evaluamos?</span></div>' +
+        '<div class="d-cifra">' + ent(terrenos.length) + '</div>' +
+        '<div class="d-exacta">' + ent(deptosTot) + ' departamentos · ' +
+        ent(areaTot) + ' m²</div>' +
+        '<div class="d-pie"><span class="d-tag">' + this._usdM(ventasTot) +
+        '</span>venta proyectada</div></div>' +
+      '<div class="d-carta d-abrible abrible" data-abre="cb-conviene" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">✓</span><span class="d-preg">¿Cuál conviene?</span></div>' +
+        '<div class="d-cifra"' + (pasan.length < 2 ? ' style="color:var(--rojo)"' : '') + '>' +
+        ent(pasan.length) + ' de ' + ent(terrenos.length) + '</div>' +
+        '<div class="d-exacta">' + esc(mejor.nombre) + ' ' + this._usd(mejor._conting) + '</div>' +
+        '<div class="d-pie"><span class="d-tag ' + (mejor._conting > 0 ? 'ok' : 'mal') + '">' +
+        esc(mejor.nombre) + '</span>' + esc(pieConviene) + '</div></div>' +
+      (conError.length ?
+      '<div class="d-carta d-abrible abrible" data-abre="cb-error" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">⚠</span><span class="d-preg">¿Cuánto cambia el dato mal cargado?</span></div>' +
+        '<div class="d-cifra" style="color:var(--rojo)">' + this._usdM(-deltaCont) + '</div>' +
+        '<div class="d-exacta">' + esc(nomError) + ' · utilidad esperada</div>' +
+        '<div class="d-pie"><span class="d-tag mal">' + esc(String(hall[0] && hall[0].area_responsable || "INM")) +
+        '</span>a revisar</div></div>' : '') +
+      (escens.length > 1 ?
+      '<div class="d-carta d-abrible abrible" data-abre="cb-valle" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">⇄</span><span class="d-preg">Valle Alto · ¿qué proyecto es?</span></div>' +
+        '<div class="d-cifra">' + ent(escens.length) + ' escenarios</div>' +
+        '<div class="d-exacta">' + ent(escens[0].pisos) + ' pisos o ' + ent(escens[1].pisos) +
+        ' · mismo lote</div>' +
+        '<div class="d-pie"><span class="d-tag mal">sin decidir</span>' +
+        this._usdM(escens[0].ingreso_total) + ' o ' + this._usdM(escens[1].ingreso_total) +
+        '</div></div>' : '') +
+      '</div>' +
+      '<div class="detalle" id="det-cb-terrenos"></div>' +
+      '<div class="detalle" id="det-cb-conviene"></div>' +
+      '<div class="detalle" id="det-cb-error"></div>' +
+      '<div class="detalle" id="det-cb-valle"></div>';
+
+    h += '<div class="d-carta">' +
+      '<h3 class="d-tit">Terrenos evaluados</h3>' +
+      '<p class="d-sub">soporta contra piden · USD</p>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Terreno</th><th class="num">m²</th><th class="num">Deptos</th>' +
+      '<th class="num">Venta proyectada</th><th class="num">Soporta pagar</th>' +
+      '<th class="num">Piden</th><th class="num">Diferencia</th>' +
+      '</tr></thead><tbody>';
+    ordenados.forEach(function (t) {
+      h += '<tr><td class="obra">' + esc(t.nombre) +
+        (t._calza ? '' : ' <span class="d-tag mal">recalculado</span>') + '</td>' +
+        '<td class="num">' + ent(t.area_terreno_m2) + '</td>' +
+        '<td class="num">' + ent(t.departamentos) + '</td>' +
+        '<td class="num">' + self._usd(t.ventas_proyectadas) + '</td>' +
+        '<td class="num">' + self._usd(t._residual) + '</td>' +
+        '<td class="num">' + self._usd(t.precio_pedido) + '</td>' +
+        '<td class="num"' + (t._conting < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        self._usd(t._conting) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    conError.forEach(function (x) {
+      h += '<p class="linea-meta">' + esc(x.nombre) +
+        ' · publicado ' + self._usd(x.contingencia) +
+        ' · recalculado ' + self._usd(x._conting) +
+        ' · ' + esc(String(hall[0] && hall[0].area_responsable || "INM")) + '</p>';
+    });
+    h += '</div>';
+
+    h += this._proyHtml(terrenos);
+
+    h += '</div>';
+
+    this._terrenos = terrenos; this._ordenados = ordenados;
+    this._conError = conError; this._esc = escens; this._VA = VA;
+    this._hall = hall; this._C = C; this._MF = MF;
+    this._deltaCont = deltaCont;
+    return h;
+  },
+
+  detalle: function (id, el) {
+    var self = this;
+    var t = '<button class="cerrar">Cerrar</button>';
+    var NE = "No existe";
+    var u = function (n) {
+      return (n === null || n === undefined || isNaN(n)) ? NE : self._usd(n);
+    };
+    var en = function (n) {
+      return (n === null || n === undefined || isNaN(n)) ? NE : ent(n);
+    };
+
+    if (id === "cb-terrenos") {
+      var h = t + '<h3>Cómo se arma · USD</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Terreno</th><th class="num">m²</th><th class="num">Venta</th>' +
+        '<th class="num">Edificación</th>' +
+        '<th class="num">Sótano</th><th class="num">Licencias</th>' +
+        '<th class="num">Gerencia</th><th class="num">Marketing</th>' +
+        '<th class="num">Utilidad esperada</th><th class="num">Demolición</th>' +
+        '<th class="num">Soporta</th><th class="num">Soporta por m² · publicado</th></tr></thead><tbody>';
+      this._ordenados.forEach(function (x) {
+        h += '<tr><td class="obra">' + esc(x.nombre) +
+          (x._calza ? '' : ' <span class="d-tag mal">recalculado</span>') + '</td>' +
+          '<td class="num">' + en(x.area_terreno_m2) + '</td>' +
+          '<td class="num">' + u(x.ventas_proyectadas) + '</td>' +
+          '<td class="num">' + u(x.costo_edificacion) + '</td>' +
+          '<td class="num">' + u(x.costo_sotano) + '</td>' +
+          '<td class="num">' + u(x.costo_especialidades) + '</td>' +
+          '<td class="num">' + u(x.costo_gerencia) + '</td>' +
+          '<td class="num">' + u(x.costo_marketing_ventas) + '</td>' +
+          '<td class="num"' + (x._calza ? '' : ' style="color:var(--rojo)"') + '>' +
+          u(x.utilidad_esperada) + '</td>' +
+          '<td class="num">' + u(x.costo_demolicion) + '</td>' +
+          '<td class="num">' + u(x._residual) + '</td>' +
+          '<td class="num">' + u(x.residual_terreno_m2) + '</td></tr>';
+      });
+      return h + '</tbody></table></div>';
+    }
+
+    if (id === "cb-conviene") {
+      var h2 = t + '<h3>Soporta contra piden · USD</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Terreno</th><th class="num">Soporta pagar</th><th class="num">Piden</th>' +
+        '<th class="num">Diferencia</th><th>Veredicto</th></tr></thead><tbody>';
+      this._ordenados.forEach(function (x) {
+        var ok = x._conting > 0;
+        h2 += '<tr><td class="obra">' + esc(x.nombre) + '</td>' +
+          '<td class="num">' + u(x._residual) + '</td>' +
+          '<td class="num">' + u(x.precio_pedido) + '</td>' +
+          '<td class="num"' + (ok ? '' : ' style="color:var(--rojo)"') + '>' +
+          u(x._conting) + '</td>' +
+          '<td><span class="d-tag ' + (ok ? 'ok' : 'mal') + '">' +
+          (ok ? 'lo soporta' : 'piden de más') + '</span></td></tr>';
+      });
+      return h2 + '</tbody></table></div>';
+    }
+
+    if (id === "cb-error") {
+      var hz = this._hall[0] || {};
+      var area = String(hz.rotulo || hz.area_responsable || "INM");
+      var h3 = t + '<h3>Utilidad esperada · lo escrito contra su rótulo</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Terreno</th><th>Utilidad esperada</th><th class="num">Tiene escrito</th>' +
+        '<th class="num">Pide su rótulo</th><th class="num">Soporta pagar</th>' +
+        '<th class="num">Diferencia contra lo que piden · publicada</th>' +
+        '<th class="num">Diferencia contra lo que piden · recalculada</th>' +
+        '</tr></thead><tbody>';
+      this._terrenos.forEach(function (x) {
+        var cc = x.utilidad_esperada_control || {};
+        h3 += '<tr><td class="obra">' + esc(x.nombre) + '</td>' +
+          '<td' + (x._calza ? '' : ' style="color:var(--rojo)"') + '>' +
+          (x._calza ? 'fórmula' : 'escrita a mano' +
+            ' <span class="ob-sub">' + esc(area) + '</span>') + '</td>' +
+          '<td class="num"' + (x._calza ? '' : ' style="color:var(--rojo)"') + '>' +
+          u(cc.valor_que_tiene) + '</td>' +
+          '<td class="num">' + u(cc.valor_que_pide_su_rotulo) + '</td>' +
+          '<td class="num">' + u(x._residual) + '</td>' +
+          '<td class="num"' + (cc.contingencia_publicada < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+          u(cc.contingencia_publicada) + '</td>' +
+          '<td class="num"' + (x._conting < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+          u(x._conting) + '</td></tr>';
+      });
+      return h3 + '</tbody></table></div>';
+    }
+
+    if (id === "cb-valle") {
+      var e0 = this._esc[0], e1 = this._esc[1];
+      var ml = this._VA.mismo_lote || {};
+      var hv = this._hall.filter(function (x) { return x.id === "valle-alto-dos-escenarios"; })[0] ||
+               this._hall[1] || {};
+      var decide = String((this._VA.contradiccion || {}).decide || "Habitat").split("·")[0].trim();
+      var txt = function (s) { return s ? esc(String(s)) : NE; };
+      var filas = [
+        ["Lote (m²)", en(ml.area_terreno_cabida_m2), en(ml.area_terreno_egp_m2)],
+        ["Pisos", en(e0.pisos), en(e1.pisos)],
+        ["Departamentos", en(e0.departamentos_totales), en(e1.departamentos_totales)],
+        ["Ingreso proyectado", u(e0.ingreso_total), u(e1.ingreso_total)],
+        ["Utilidad neta", u(e0.utilidad_neta), u(e1.utilidad_neta)],
+        ["Terreno", u(e0.costo_terreno), u(e1.costo_terreno || e1.inversion_terreno)]
+      ];
+      var h4 = t + '<h3>Valle Alto · escenarios lado a lado</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th></th><th class="num">' + esc(String(e0.escenario || "")) + '</th>' +
+        '<th class="num">' + esc(String(e1.escenario || "")) + '</th>' +
+        '</tr></thead><tbody>';
+      filas.forEach(function (f) {
+        h4 += '<tr><td class="obra">' + esc(f[0]) + '</td>' +
+          '<td class="num">' + f[1] + '</td><td class="num">' + f[2] + '</td></tr>';
+      });
+      h4 += '<tr class="total"><td class="obra">Qué descuenta la utilidad neta' +
+        '<span class="ob-sub">no miden lo mismo · ' +
+        esc(String(hv.rotulo || hv.area_responsable || "INM")) +
+        ' · decide ' + esc(decide) + '</span></td>' +
+        '<td>' + txt(e0.utilidad_neta_alcance) + '</td>' +
+        '<td>' + txt(e1.utilidad_neta_alcance) + '</td></tr>';
+      return h4 + '</tbody></table></div>';
+    }
+    return null;
+  },
+
+  conectar: function () {
+    var self = this, caja = document.getElementById("cb-proy");
+    if (!caja) return;
+    var res = function () {
+      var r = document.getElementById("cb-res");
+      if (r) r.innerHTML = self._proyRes();
+    };
+    caja.addEventListener("input", function (ev) {
+      var k = ev.target && ev.target.getAttribute ? ev.target.getAttribute("data-cb") : null;
+      if (!k) return;
+      self._pe[k] = ev.target.value;
+      self._peDe = "";
+      [].forEach.call(caja.querySelectorAll("[data-cb-cargar]"), function (b) {
+        b.classList.remove("activa"); });
+      res();
+    });
+    caja.addEventListener("click", function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest("[data-cb-cargar]") : null;
+      if (!b) return;
+      self._peCargar(b.getAttribute("data-cb-cargar"));
+      [].forEach.call(caja.querySelectorAll("[data-cb]"), function (inp) {
+        inp.value = self._pe[inp.getAttribute("data-cb")]; });
+      [].forEach.call(caja.querySelectorAll("[data-cb-cargar]"), function (x) {
+        x.classList.toggle("activa", x === b); });
+      res();
+    });
+  }
+};
+</script>
+</body>
+</html>

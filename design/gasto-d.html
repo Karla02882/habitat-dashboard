@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gasto · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "gasto-d",
+  nombre: "Gasto",
+  pregunta: "¿En qué se va el dinero?",
+  fuentes: ["AXION"],
+
+  filtros: ["banco"],
+  ventanas: {},
+
+  _rsCuenta: function (c) {
+    c = String(c || "").toUpperCase();
+    if (c.indexOf("CONSTRUCTORA VELASCO") >= 0)
+      return "CONSTRUCTORA VELASCO LEON SOCIEDAD ANONIMA CERRADA";
+    if (c.indexOf("CORPORACION HABITAT") >= 0)
+      return "CORPORACION HABITAT SOCIEDAD ANONIMA CERRADA";
+    if (c.indexOf("BIENES RAICES") >= 0)
+      return "HABITAT BIENES RAICES EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA";
+    if (c.indexOf("ESCALAR") >= 0)
+      return "ESCALAR Y HABITAT GRUPO INMOBILIARIO S.A.C.";
+    if (c.indexOf("YEAN") >= 0) return "YEAN WILLIAM VELASCO LEON";
+    return "";
+  },
+  _entraRSCuenta: function (c) { return !RS || this._rsCuenta(c) === RS; },
+  _rsNombre: function (c) {
+    c = String(c || "").toUpperCase();
+    if (c.indexOf("CONSTRUCTORA VELASCO") >= 0) return "CONSTRUCTORA VELASCO LEON S.A.C.";
+    if (c.indexOf("CORPORACION HABITAT") >= 0) return "CORPORACION HABITAT S.A.C.";
+    if (c.indexOf("BIENES RAICES") >= 0) return "HABITAT BIENES RAICES E.I.R.L.";
+    if (c.indexOf("ESCALAR") >= 0) return "ESCALAR Y HABITAT GRUPO INMOBILIARIO S.A.C.";
+    if (c.indexOf("HABITAT LE") >= 0) return "HABITAT LEÓN S.A.C.";
+    if (c.indexOf("YEAN") >= 0) return "YEAN WILLIAM VELASCO LEON";
+    return "";
+  },
+  _banco: function (c) {
+    c = String(c || "");
+    if (!c) return "(sin cuenta)";
+    return c.indexOf(" - ") > 0 ? c.split(" - ")[0] : c;
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var pp = perPartes();
+    var fl = D.flujo || {};
+    var anioCaja = Number(fl.anio || 0);
+    var prefP = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+    var anioG = pp.hist ? anioCaja : (pp.anio || anioCaja);
+
+    var Fb = ((D.libro || {}).filas) || {};
+    var noms = Fb.cuenta || [], cats = Fb.cat || [], obrasN = Fb.obra || [];
+    var pasa = function (r) {
+      if (r[7] !== "gasto") return null;
+      var cu = noms[r[6]];
+      if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return null;
+      var ob = r[5] !== null && r[5] !== undefined ? obrasN[r[5]] : null;
+      if (OBRA && ob !== OBRA) return null;
+      return {fecha: String(r[0]),
+        cat: (r[2] !== null && r[2] !== undefined) ? cats[r[2]] : null,
+        concepto: String(r[3] || "—"), monto: r[4] || 0, obra: ob, cuenta: cu,
+        banco: self._banco(cu),
+        rs: self._rsNombre(cu) || (cu ? String(cu) : "(sin cuenta)")};
+    };
+    var rows = [], rowsAnio = [];
+    (Fb.f || []).forEach(function (r) {
+      var f = String(r[0] || "");
+      var enAnio = f.indexOf(String(anioG)) === 0;
+      var enPer = !prefP || f.indexOf(prefP) === 0;
+      if (!enAnio && !enPer) return;
+      var x = pasa(r);
+      if (!x) return;
+      if (enAnio) rowsAnio.push(x);
+      if (enPer) rows.push(x);
+    });
+    var gastado = 0, sinRot = 0, sinObra = 0;
+    rows.forEach(function (r) {
+      gastado += r.monto;
+      if (!r.cat) sinRot += r.monto;
+      if (!r.obra) sinObra += r.monto;
+    });
+
+    var agr = function (llave) {
+      var o = {};
+      rows.forEach(function (r) {
+        var k = r[llave] || (llave === "cat" ? "(sin categoría)" :
+                (llave === "obra" ? "(sin proyecto)" : "(sin cuenta)"));
+        o[k] = (o[k] || 0) + r.monto;
+      });
+      return Object.keys(o).map(function (k) { return [k, o[k]]; })
+        .sort(function (a, b) { return b[1] - a[1]; });
+    };
+    var porCat = agr("cat"), porObra = agr("obra"), porCta = agr("cuenta");
+    var porBanco = agr("banco"), porRS = agr("rs");
+    var MES3C0 = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul",
+                  "Ago", "Set", "Oct", "Nov", "Dic"];
+    var topDe = function (lista) {
+      for (var i = 0; i < lista.length; i++)
+        if (lista[i][0].charAt(0) !== "(") return lista[i];
+      return null;
+    };
+
+    var mesAct0 = 0;
+    (fl.meses || []).forEach(function (m) { if (m.en_curso) mesAct0 = m.mes; });
+    var serieDe = function (filtro) {
+      var s = [], i;
+      for (i = 0; i <= 12; i++) s[i] = 0;
+      rowsAnio.forEach(function (r) {
+        if (filtro && !filtro(r)) return;
+        s[parseInt(r.fecha.slice(5, 7), 10)] += r.monto;
+      });
+      return s;
+    };
+    var chispa = function (serie, roja) {
+      var max = 0, i, vivos = [];
+      for (i = 1; i <= 12; i++) if (serie[i] > 0) { vivos.push(i); if (serie[i] > max) max = serie[i]; }
+      if (!vivos.length) return '';
+      var desde = vivos[0], hasta = vivos[vivos.length - 1];
+      var t = '<div class="d-chispa' + (roja ? ' roja' : '') + '">';
+      for (i = desde; i <= hasta; i++) {
+        var alto = max > 0 ? Math.max(2, Math.round(30 * serie[i] / max)) : 2;
+        t += '<i class="' + (anioG === anioCaja && i === mesAct0 ? 'act' : '') +
+          '" style="height:' + alto + 'px" title="' + esc(MES3C0[i]) + ' ' +
+          soles(serie[i]) + '"></i>';
+      }
+      t += '</div><div class="d-chispa-pie"><span>' + esc(MES3C0[desde]) +
+        '</span><span>' + esc(MES3C0[hasta]) + '</span></div>';
+      return t;
+    };
+    var carta = function (abre, chip, preg, top, rotVacio, pieExtra, filtroSerie) {
+      var t = '<div class="d-carta d-abrible abrible" data-abre="' + abre +
+        '" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">' + chip +
+        '</span><span class="d-preg">' + esc(preg) + '</span></div>';
+      if (top) {
+        t += '<div class="d-cifra">' + solesM(top[1]) + '</div>' +
+          '<div class="d-exacta">' + esc(top[0]) + '</div>' +
+          '<div class="d-pie"><span class="d-tag">' +
+          (gastado ? fmt1(top[1] / gastado * 100) : '0.0') + '%</span>' +
+          esc(pieExtra) + '</div>' +
+          chispa(serieDe(filtroSerie), false);
+      } else {
+        t += '<div class="d-cifra">—</div>' +
+          '<div class="d-exacta">' + esc(rotVacio) + '</div>' +
+          '<div class="d-pie">clic: el reparto completo</div>';
+      }
+      return t + '</div>';
+    };
+
+    var h = '<div class="d-lienzo">';
+
+    var tCat = topDe(porCat), tObra = topDe(porObra), tBanco = topDe(porBanco),
+        /* la tarjeta nombra una razón social: EFECTIVO no compite */
+        tRS = topDe(porRS.filter(function (x) { return !!self._rsNombre(x[0]); }));
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-abrible abrible" data-abre="g-top" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">↑</span><span class="d-preg">¿Cuánto se gastó?</span></div>' +
+        '<div class="d-cifra">' + solesM(gastado) + '</div>' +
+        '<div class="d-exacta">' + soles(gastado) + ' · ' + ent(rows.length) + ' pagos</div>' +
+        '<div class="d-pie">del Registro de Movimientos</div>' +
+        chispa(serieDe(null), false) + '</div>' +
+      carta("g-cat", "▦", "¿En qué se gasta?", tCat,
+            "sin categorías cargadas en el período", "la mayor con categoría",
+            tCat ? function (r) { return r.cat === tCat[0]; } : null) +
+      carta("g-obra", "⌂", "¿En qué proyecto?", tObra,
+            "sin proyectos cargados en el período", "la mayor con proyecto",
+            tObra ? function (r) { return r.obra === tObra[0]; } : null) +
+      carta("g-banco", "▤", "¿De qué banco sale?", tBanco,
+            "sin cuentas cargadas en el período", "por cuenta, en el clic",
+            tBanco ? function (r) { return r.banco === tBanco[0]; } : null) +
+      '</div>' +
+      '<div class="detalle" id="det-g-top"></div>' +
+      '<div class="detalle" id="det-g-cat"></div>' +
+      '<div class="detalle" id="det-g-obra"></div>' +
+      '<div class="detalle" id="det-g-banco"></div>';
+
+    h += '<div class="d-kpis">' +
+      carta("g-rs", "◈", "¿De qué razón social?", tRS,
+            "sin cuentas cargadas en el período", "la mayor con cuenta",
+            tRS ? function (r) { return r.rs === tRS[0]; } : null) +
+      '<div class="d-carta"><div class="d-cab"><span class="d-chip">?</span>' +
+        '<span class="d-preg">Sin categoría</span></div>' +
+        '<div class="d-cifra"' + (sinRot > 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        solesM(sinRot) + '</div>' +
+        '<div class="d-exacta">' + (gastado ? fmt1(sinRot / gastado * 100) : '0.0') +
+        '% del gastado</div>' +
+        '<div class="d-pie">el campo CATEGORÍA vacío al cargar · Administración</div>' +
+        chispa(serieDe(function (r) { return !r.cat; }), true) + '</div>' +
+      '<div class="d-carta"><div class="d-cab"><span class="d-chip">⌂</span>' +
+        '<span class="d-preg">Sin proyecto</span></div>' +
+        '<div class="d-cifra"' + (sinObra > 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        solesM(sinObra) + '</div>' +
+        '<div class="d-exacta">' + (gastado ? fmt1(sinObra / gastado * 100) : '0.0') +
+        '% del gastado</div>' +
+        '<div class="d-pie">PROYECTO vacío o que no es un proyecto de AXION · Administración</div>' +
+        chispa(serieDe(function (r) { return !r.obra; }), true) + '</div>' +
+      '</div>' +
+      '<div class="detalle" id="det-g-rs"></div>';
+
+    var salioMes = {}, salio25 = {}, nMes = {}, n25 = {};
+    rowsAnio.forEach(function (r) {
+      var m = parseInt(r.fecha.slice(5, 7), 10);
+      salioMes[m] = (salioMes[m] || 0) + r.monto;
+      nMes[m] = (nMes[m] || 0) + 1;
+    });
+    (Fb.f || []).forEach(function (r) {
+      var f = String(r[0] || "");
+      if (f.indexOf("2025") !== 0) return;
+      var x = pasa(r);
+      if (!x) return;
+      var m = parseInt(f.slice(5, 7), 10);
+      if (!(m >= 1 && m <= 12)) return;
+      salio25[m] = (salio25[m] || 0) + x.monto;
+      n25[m] = (n25[m] || 0) + 1;
+    });
+    var mesAct = 0;
+    (fl.meses || []).forEach(function (m) { if (m.en_curso) mesAct = m.mes; });
+    var hay25 = Object.keys(salio25).length > 0 && anioG !== 2025;
+    this._gg = {salioMes: salioMes, salio25: salio25, nMes: nMes, n25: n25,
+                anioG: anioG, anioCaja: anioCaja, mesAct: mesAct,
+                RS: RS, BANCO: BANCO, OBRA: OBRA};
+    if (!this._vGas || !hay25) this._vGas = "act";
+
+    if (Object.keys(salioMes).length || hay25) {
+      h += '<div class="d-carta">' +
+        '<div class="gt-cab"><h3 class="d-tit">El gasto, mes a mes</h3>' + gtBotones("gasto") + '</div>' +
+        (hay25
+          ? '<div class="pills-emp" id="pills-gasto" style="margin:6px 0 2px">' +
+            '<button class="pill-emp pill-vg' + (this._vGas === "act" ? ' activa' : '') +
+            '" data-vg="act" type="button">' + esc(String(anioG)) + '</button>' +
+            '<button class="pill-emp pill-vg' + (this._vGas === "2025" ? ' activa' : '') +
+            '" data-vg="2025" type="button">2025</button>' +
+            '<button class="pill-emp pill-vg' + (this._vGas === "comp" ? ' activa' : '') +
+            '" data-vg="comp" type="button">2025 vs ' + esc(String(anioG)) + '</button></div>'
+          : '') +
+        '<div id="graf-gasto">' + this._grafGasto() + '</div></div>';
+      Object.keys(salioMes).map(Number).sort(function (a, b) { return a - b; })
+        .forEach(function (m) {
+          h += '<div class="detalle" id="det-g-m' + m + '"></div>';
+        });
+    }
+    h += '</div>';
+    this._rows = rows; this._rowsAnio = rowsAnio; this._gastado = gastado;
+    this._porCat = porCat; this._porObra = porObra; this._porCta = porCta;
+    this._porBanco = porBanco; this._porRS = porRS;
+    this._anioG = anioG;
+    this._MESL = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                  "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"];
+    return h;
+  },
+
+  _grafGasto: function () {
+    var G = this._gg || {};
+    var MES3 = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul",
+                "Ago", "Set", "Oct", "Nov", "Dic"];
+    var fmtK = function (v) {
+      return v >= 995000 ? (v / 1e6).toFixed(2) + 'M' : Math.round(v / 1e3) + 'K';
+    };
+    var recorte = (G.RS ? ' · cuentas de esa razón' : (G.BANCO ? ' · ' + esc(G.BANCO) : '')) +
+                  (G.OBRA ? ' · ' + esc(G.OBRA) : '');
+    var vista = (this._vGas || "act");
+    var t = "";
+
+    if (vista === "act" || vista === "2025") {
+      var serie = (vista === "act") ? G.salioMes : G.salio25;
+      var cuenta = (vista === "act") ? G.nMes : G.n25;
+      var rot = (vista === "act") ? String(G.anioG) : "2025";
+      var ms = Object.keys(serie).map(Number).sort(function (a, b) { return a - b; });
+      if (!ms.length) return '<p class="d-sub">sin gasto de ese año con estos filtros</p>';
+      var tot = 0, totN = 0, mx = 1;
+      ms.forEach(function (m) {
+        tot += serie[m]; totN += cuenta[m] || 0; mx = Math.max(mx, serie[m]); });
+      t += '<p class="d-sub">salió · ' + esc(rot) + ' · en miles · ' + soles(tot) +
+        ' en ' + ent(totN) + (totN === 1 ? ' movimiento' : ' movimientos') +
+        (vista === "act" ? ' · clic en un mes para abrirlo' : '') + '</p>' +
+        '<div class="d-leyenda"><span><i style="background:#1B3A7A"></i>Salió' +
+        recorte + '</span>' +
+        (vista === "act" && G.anioG === G.anioCaja
+          ? '<span><i style="background:#FFC526"></i>mes en curso</span>' : '') +
+        '</div><div class="d-grafico ancho">';
+      ms.forEach(function (m) {
+        var abre = (vista === "act");
+        var esAct = (abre && G.anioG === G.anioCaja && m === G.mesAct);
+        t += '<div class="d-mes' + (esAct ? ' actual' : '') +
+          (abre ? ' abrible" data-abre="g-m' + m +
+                  '" aria-expanded="false" tabindex="0" role="button">' : '">') +
+          '<div class="d-bval"><b>' + fmtK(serie[m]) + '</b></div>' +
+          '<div class="d-barras"><i class="d-b" style="height:' +
+          Math.max(3, Math.round(132 * serie[m] / mx)) + 'px"></i></div>' +
+          '<span>' + MES3[m] + '</span></div>';
+      });
+      var iG = t.lastIndexOf('<div class="d-grafico ancho">');
+      var grafG = t.slice(iG) + '</div>';
+      t = t.slice(0, iG);
+      var filasG = ms.map(function (m) {
+        return [MES3[m], ent(cuenta[m] || 0), soles(serie[m])];
+      });
+      return t + gtCaja("gasto", grafG, gtTabla(
+        [{rot: "Mes"}, {rot: "Movimientos", num: true}, {rot: "Salió", num: true}],
+        filasG, ["Total", ent(totN), soles(tot)]));
+    }
+
+    var meses = [];
+    for (var m = 1; m <= 12; m++) {
+      if ((G.salio25[m] || 0) > 0 || (G.salioMes[m] || 0) > 0) meses.push(m);
+    }
+    var mx2 = 1;
+    meses.forEach(function (m) {
+      mx2 = Math.max(mx2, G.salio25[m] || 0, G.salioMes[m] || 0); });
+    t += '<p class="d-sub">salió · 2025 vs ' + esc(String(G.anioG)) + ' · en miles' +
+      recorte + '</p>' +
+      '<div class="d-leyenda"><span><i style="background:#B9C6E4"></i>2025</span>' +
+      '<span><i style="background:#1B3A7A"></i>' + esc(String(G.anioG)) + '</span>' +
+      '</div><div class="d-grafico comp" data-gt-graf="gasto"' +
+      (GT.gasto === "tabla" ? ' hidden' : '') + '>';
+    meses.forEach(function (m) {
+      var v25 = G.salio25[m] || 0, v26 = G.salioMes[m] || 0;
+      t += '<div class="d-mes">' +
+        '<div class="d-bval"><b>' + (v26 ? fmtK(v26) : '—') + '</b>' +
+        '<span class="v25">' + (v25 ? fmtK(v25) : '—') + '</span></div>' +
+        '<div class="d-barras">' +
+        '<i class="d-b b25" style="height:' +
+        Math.max(3, Math.round(132 * v25 / mx2)) + 'px"></i>' +
+        '<i class="d-b" style="height:' +
+        Math.max(3, Math.round(132 * v26 / mx2)) + 'px"></i>' +
+        '</div><span>' + MES3[m] + '</span></div>';
+    });
+    t += '</div>';
+
+    var t25 = 0, t26 = 0, c25 = 0, c26 = 0, con26 = [];
+    meses.forEach(function (m) {
+      if ((G.salioMes[m] || 0) > 0) {
+        con26.push(m);
+        t25 += G.salio25[m] || 0; t26 += G.salioMes[m] || 0;
+        c25 += G.n25[m] || 0; c26 += G.nMes[m] || 0;
+      }
+    });
+    var a25 = 0, an25 = 0;
+    Object.keys(G.salio25).forEach(function (m) { a25 += G.salio25[m]; });
+    Object.keys(G.n25).forEach(function (m) { an25 += G.n25[m]; });
+    var celVar = function (v25, v26) {
+      var d = v26 - v25;
+      /* gastar MENOS es lo bueno: el verde va cuando la diferencia baja */
+      var c = d <= 0 ? 'var(--verde,#1a7f4e)' : 'var(--rojo,#C22B2B)';
+      var pct = v25 > 0 ? (100 * d / v25) : null;
+      return '<td class="num" style="color:' + c + ';font-weight:600">' +
+        (d >= 0 ? '+' : '−') + soles(Math.abs(d)) + '</td>' +
+        '<td class="num" style="color:' + c + ';font-weight:600">' +
+        (pct === null ? '—' : (pct >= 0 ? '+' : '−') + fmt1(Math.abs(pct)) + '%') + '</td>';
+    };
+    t += '<div class="envoltura-tabla" style="margin-top:var(--e3)">' +
+      '<table class="datos"><thead><tr><th>Mes</th>' +
+      '<th class="num">Movim. 25/' + esc(String(G.anioG).slice(2)) + '</th>' +
+      '<th class="num">2025</th><th class="num">' + esc(String(G.anioG)) + '</th>' +
+      '<th class="num">Variación</th><th class="num">% · verde es gastar menos</th>' +
+      '</tr></thead><tbody>';
+    meses.forEach(function (m) {
+      var v25 = G.salio25[m] || 0, v26 = G.salioMes[m] || 0;
+      t += '<tr><td class="obra">' + MES3[m] + '</td>' +
+        '<td class="num">' + ent(G.n25[m] || 0) + ' / ' +
+        (v26 > 0 ? ent(G.nMes[m] || 0) : '—') + '</td>' +
+        '<td class="num">' + (v25 ? soles(v25) : '—') + '</td>' +
+        '<td class="num">' + (v26 ? soles(v26) : '—') + '</td>' +
+        (v26 > 0 ? celVar(v25, v26)
+                 : '<td class="num">—</td><td class="num">—</td>') + '</tr>';
+    });
+    if (con26.length) {
+      t += '<tr class="total"><td class="obra">TOTAL ' + MES3[con26[0]] + '–' +
+        MES3[con26[con26.length - 1]] + '</td>' +
+        '<td class="num">' + ent(c25) + ' / ' + ent(c26) + '</td>' +
+        '<td class="num">' + soles(t25) + '</td>' +
+        '<td class="num">' + soles(t26) + '</td>' + celVar(t25, t26) + '</tr>';
+    }
+    t += '<tr class="total"><td class="obra">2025 año completo</td>' +
+      '<td class="num">' + ent(an25) + '</td>' +
+      '<td class="num">' + soles(a25) + '</td>' +
+      '<td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>';
+    return t + '</tbody></table></div>';
+  },
+
+  detalle: function (id, el) {
+    var self = this;
+    var t = '<button class="cerrar">Cerrar</button>';
+    var tabla = function (lista, colIzq) {
+      var suma = 0;
+      lista.forEach(function (r) { suma += r[1]; });
+      var tt = '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>' + esc(colIzq) + '</th><th class="num">Salió</th><th class="num">%</th>' +
+        '</tr></thead><tbody>';
+      var resto = 0, hijas = [];
+      lista.forEach(function (r, i) {
+        var celdas = '<td class="obra">' + esc(r[0]) + '</td>' +
+          '<td class="num">' + soles(r[1]) + '</td>' +
+          '<td class="num">' + (suma ? fmt1(r[1] / suma * 100) : '0.0') + '%</td>';
+        if (i < 8) tt += '<tr>' + celdas + '</tr>';
+        else { resto += r[1]; hijas.push(celdas); }
+      });
+      if (hijas.length) {
+        tt += filaOtros('… ' + ent(hijas.length) + ' más',
+          '<td class="num">' + soles(resto) + '</td>' +
+          '<td class="num">' + (suma ? fmt1(resto / suma * 100) : '0.0') + '%</td>', hijas);
+      }
+      tt += '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + soles(suma) + '</td><td class="num">100%</td></tr>';
+      return tt + '</tbody></table></div>';
+    };
+    var NE = "No existe";
+    var top5 = function (lista, pie) {
+      var tt = '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Fecha</th><th>Concepto</th><th>Cuenta</th><th class="num">Salió</th>' +
+        '</tr></thead><tbody>';
+      var orden = lista.slice().sort(function (a, b) { return b.monto - a.monto; })
+        .slice(0, 5);
+      if (!orden.length) {
+        tt += '<tr><td class="obra">' + NE + '</td><td>' + NE + '</td><td>' + NE +
+          '</td><td class="num">' + NE + '</td></tr>';
+      }
+      orden.forEach(function (r) {
+        tt += '<tr><td class="obra">' + esc(r.fecha) + '</td>' +
+          '<td>' + (r.concepto === "—" ? NE : esc(r.concepto.slice(0, 46))) + '</td>' +
+          '<td>' + (r.cuenta ? esc(String(r.cuenta)) : NE) + '</td>' +
+          '<td class="num">' + soles(r.monto) + '</td></tr>';
+      });
+      return tt + (pie || '') + '</tbody></table></div>';
+    };
+
+    if (id === "g-top")
+      return t + '<h3>Los cinco mayores gastos</h3>' + top5(this._rows);
+    if (id === "g-cat")
+      return t + '<h3>Por categoría</h3>' + tabla(this._porCat, "Categoría");
+    if (id === "g-obra")
+      return t + '<h3>Por proyecto</h3>' + tabla(this._porObra, "Proyecto");
+
+    if (id === "g-banco") {
+      var fila = function (rot, v, suma, total) {
+        return '<tr' + (total ? ' class="total"' : '') + '><td class="obra">' + rot + '</td>' +
+          '<td class="num">' + soles(v) + '</td>' +
+          '<td class="num">' + (suma ? fmt1(v / suma * 100) : '0.0') + '%</td></tr>';
+      };
+      var sumC = 0, sumB = 0, restoC = 0, restoB = 0;
+      this._porCta.forEach(function (r) { sumC += r[1]; });
+      this._porBanco.forEach(function (r) { sumB += r[1]; });
+      var tb = t + '<h3>Por cuenta y por banco</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cuenta</th><th class="num">Salió</th><th class="num">%</th>' +
+        '</tr></thead><tbody>';
+      this._porCta.forEach(function (r) {
+        tb += fila(esc(r[0]), r[1], sumC, false);
+      });
+      if (restoC > 0) tb += fila('… ' + ent(self._porCta.length - 8) + ' más', restoC, sumC, false);
+      this._porBanco.forEach(function (r) {
+        tb += fila('TOTAL · ' + esc(r[0]), r[1], sumB, true);
+      });
+      if (restoB > 0) {
+        tb += fila('TOTAL · … ' + ent(self._porBanco.length - 8) + ' bancos más', restoB, sumB, true);
+      }
+      return tb + '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + soles(sumC) + '</td><td class="num">100%</td></tr>' +
+        '</tbody></table></div>';
+    }
+    if (id === "g-rs")
+      return t + '<h3>Por razón social</h3>' + tabla(this._porRS, "Razón social");
+
+    if (id.indexOf("g-m") === 0) {
+      var mes = parseInt(id.slice(3), 10);
+      var pm = String(this._anioG) + "-" + (mes < 10 ? "0" : "") + mes;
+      var delMes = this._rowsAnio.filter(function (r) {
+        return r.fecha.indexOf(pm) === 0; });
+      var s = 0;
+      delMes.forEach(function (r) { s += r.monto; });
+      return t + '<h3>' + esc(this._MESL[mes] + ' ' + this._anioG) +
+        ' · los mayores pagos</h3>' +
+        top5(delMes, '<tr class="total"><td class="obra">TOTAL del mes · ' +
+          ent(delMes.length) + ' pagos' +
+          (delMes.length > 5 ? ' · se muestran 5' : '') + '</td><td></td><td></td>' +
+          '<td class="num">' + soles(s) + '</td></tr>');
+    }
+    return null;
+  },
+
+  conectar: function () {
+    var self = this;
+    var pills = document.getElementById("pills-gasto");
+    if (!pills) return;
+    pills.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".pill-vg") : null;
+      if (!b) return;
+      var v = b.getAttribute("data-vg");
+      if (v === self._vGas) return;
+      self._vGas = v;
+      [].forEach.call(pills.querySelectorAll(".pill-vg"), function (x) {
+        x.classList.toggle("activa", x.getAttribute("data-vg") === v);
+      });
+      var caja = document.getElementById("graf-gasto");
+      if (!caja) return;
+      caja.innerHTML = self._grafGasto();
+      conectarAbribles(caja);
+    });
+  }
+};
+</script>
+</body>
+</html>

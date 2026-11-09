@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Bitácora</title>
+<link rel="stylesheet" href="cockpit.css"></head>
+<body>
+<script>
+window.HOJA = {
+  id: "bitacora",
+  nombre: "Bitácora",
+  titulo: "Bitácora de obra",
+  pregunta: "¿Qué se hizo en obra, y con cuánta gente?",
+  sinRazonObra: true,
+  sinPeriodo: true,
+  filtros: [],
+
+  _abierto: "",
+  _busca: "",
+  _tipo: "",
+
+  pintar: function (M, D) {
+    var B = (D || {}).bitacora || {};
+    if (!B.hay) {
+      return '<div class="d-lienzo"><div class="tarjeta">' +
+        '<span class="overline">Bitácora</span>' +
+        '<p class="mas">' + esc(B.motivo || "sin partes de obra publicados") +
+        ' · Obra</p></div></div>';
+    }
+    var self = this;
+    var bus = (this._busca || "").toUpperCase();
+    var abierto = this._abierto, tipo = this._tipo;
+    var T = B.totales || {};
+
+    var visto = function (p) {
+      if (!bus) return p.dias || [];
+      if (String(p.proyecto).toUpperCase().indexOf(bus) >= 0) return p.dias || [];
+      return (p.dias || []).filter(function (d) {
+        return String(d.que).toUpperCase().indexOf(bus) >= 0 ||
+               String(d.quien).toUpperCase().indexOf(bus) >= 0 ||
+               String(d.fecha).indexOf(bus) >= 0;
+      });
+    };
+    var entraTipo = function (p) { return !tipo || p.tipo === tipo; };
+    var nDias = function (ds) {
+      var s = {};
+      ds.forEach(function (d) { s[d.fecha] = 1; });
+      return Object.keys(s).length;
+    };
+
+    var h = '<div class="d-lienzo">';
+
+    /* 1 · LA BARRA, igual que en Propiedades Habitat */
+    h += '<div class="st-barra">' +
+      '<div class="bi-tot"><b>' + ent(T.partes || 0) + '</b> partes' +
+      '<span class="st-sep">' + esc(T.desde || "") + ' → ' + esc(T.hasta || "") +
+      ' · ' + ent(T.proyectos || 0) + ' obras</span></div>' +
+      '<label class="st-campo">Buscar<input id="bi-busca" type="search" ' +
+      'placeholder="obra, partida, responsable…" value="' +
+      esc(this._busca || "") + '"></label>' +
+      '<div class="st-tipos">' +
+        '<button type="button" class="st-pill' + (tipo ? '' : ' st-pill-on') +
+        '" data-tipo="">Todos</button>' +
+        (B.tipos || []).map(function (x) {
+          return '<button type="button" class="st-pill' +
+            (tipo === x ? ' st-pill-on' : '') + '" data-tipo="' + esc(x) + '">' +
+            esc(x) + '</button>';
+        }).join("") +
+      '</div></div>';
+
+    h += '<div class="st-grid">';
+    var conAlgo = 0;
+    (B.proyectos || []).forEach(function (p, i) {
+      if (!entraTipo(p)) return;
+      var dias = visto(p);
+      if (!dias.length) return;
+      conAlgo++;
+      var id = "o" + i;
+      var esta = (abierto === id);
+      h += '<div class="st-tarj' + (esta ? ' st-on' : '') + '" data-obra="' + id + '" ' +
+        'tabindex="0" role="button" aria-expanded="' + (esta ? 'true' : 'false') + '">' +
+        '<div class="st-nom">' + esc(p.proyecto) +
+          '<span class="st-tipo">' + esc(p.tipo || "sin proyecto en AXION · Obra") + '</span></div>' +
+        '<div class="st-libres"><b>' + ent(nDias(dias)) + '</b> días</div>' +
+        '<div class="st-rango">' + esc(p.desde) + ' → ' + esc(p.hasta) + '</div>' +
+        '<div class="st-rango st-chico">hasta ' + ent(p.trab_max) +
+        ' trabajadores en un día</div>' +
+        '<div class="st-ver">' + (esta ? 'Cerrar' : 'Ver la bitácora') + '</div>' +
+        '</div>';
+    });
+    h += '</div>';
+
+    var elegido = null;
+    (B.proyectos || []).forEach(function (p, i) {
+      if (abierto === "o" + i && entraTipo(p)) elegido = p;
+    });
+    if (elegido) {
+      var dias = visto(elegido);
+      h += '<div class="tarjeta st-lista">' +
+        '<button type="button" class="st-cerrar" aria-label="Cerrar">✕</button>' +
+        '<span class="overline">' + esc(elegido.proyecto) +
+        '<span class="st-cuenta">' + ent(dias.length) + ' partes · ' + ent(nDias(dias)) + ' días · hasta ' +
+        ent(elegido.trab_max) + ' trabajadores en un día</span></span>' +
+        '<div class="envoltura-tabla"><table class="datos bi-tabla"><thead><tr>' +
+        '<th>Fecha</th><th>Qué se hizo</th><th>Responsable</th>' +
+        '<th class="num">Trabajadores</th></tr></thead><tbody>';
+      dias.forEach(function (d) {
+        var det = (B.categorias || []).map(function (rot, k) {
+          return (d.cat[k] ? rot + ' ' + d.cat[k] : "");
+        }).filter(Boolean).join(' · ');
+        h += '<tr><td class="obra">' + esc(d.fecha) +
+          (d.clima ? '<span class="ob-sub"> ' + esc(d.clima) + '</span>' : '') +
+          '</td>' +
+          '<td class="bi-que">' + esc(d.que) +
+          (d.nota ? '<span class="ob-sub"> ' + esc(d.nota) + '</span>' : '') +
+          ((d.urls || []).length
+            ? '<span class="bi-tira">' + d.urls.map(function (u, i) {
+                return '<a class="bi-foto" href="' + esc(u) + '" target="_blank" ' +
+                  'rel="noopener" data-dia="' + esc(d.fecha) + '" data-i="' + i + '" ' +
+                  'title="Foto ' + (i + 1) + ' de ' + d.urls.length +
+                  ' · ' + esc(d.fecha) + '"><img src="' + esc(u) + '" alt="' +
+                  esc(d.fecha) + ' · foto ' + (i + 1) + '" loading="lazy" ' +
+                  'decoding="async"></a>';
+              }).join('') + '</span>'
+            : (d.fotos ? '<span class="bi-fotos">' + ent(d.fotos) + ' fotos</span>' : '')) +
+          '</td>' +
+          '<td>' + esc(d.quien) + '</td>' +
+          '<td class="num">' + (d.trab ? ent(d.trab) : '—') +
+          (det ? '<span class="ob-sub">' + esc(det) + '</span>' : '') +
+          '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+    }
+
+    if (!conAlgo) {
+      h += '<div class="tarjeta"><p class="mas">Ninguna obra con esa búsqueda</p></div>';
+    }
+    return h + '</div>';
+  },
+
+  _visor: function () {
+    if (window.__biVisor) return;
+    window.__biVisor = true;
+    var v = document.createElement("div");
+    v.className = "bi-visor";
+    v.hidden = true;
+    v.innerHTML =
+      '<div class="bi-visor-top"><span class="bi-visor-cuenta"></span>' +
+      '<button type="button" class="bi-visor-x" aria-label="Cerrar">✕</button></div>' +
+      '<button type="button" class="bi-visor-ant" aria-label="Foto anterior">‹</button>' +
+      '<img class="bi-visor-img" alt="">' +
+      '<button type="button" class="bi-visor-sig" aria-label="Foto siguiente">›</button>';
+    document.body.appendChild(v);
+    var img = v.querySelector(".bi-visor-img"),
+        cuenta = v.querySelector(".bi-visor-cuenta"),
+        ant = v.querySelector(".bi-visor-ant"),
+        sig = v.querySelector(".bi-visor-sig");
+    var fotos = [], k = 0, dia = "";
+    var mostrar = function (n) {
+      if (n < 0 || n >= fotos.length) return;
+      k = n;
+      img.src = fotos[k];
+      img.alt = dia + " · foto " + (k + 1) + " de " + fotos.length;
+      cuenta.textContent = (k + 1) + " de " + fotos.length + " · " + dia;
+      ant.hidden = k === 0;
+      sig.hidden = k === fotos.length - 1;
+      [k - 1, k + 1].forEach(function (j) {
+        if (j >= 0 && j < fotos.length) { var p = new Image(); p.src = fotos[j]; }
+      });
+    };
+    var cerrar = function () { v.hidden = true; img.removeAttribute("src"); };
+    document.addEventListener("click", function (ev) {
+      var a = ev.target.closest ? ev.target.closest(".bi-foto") : null;
+      if (!a) return;
+      /* ctrl/cmd+clic sigue abriendo la foto en otra pestaña */
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button === 1) return;
+      ev.preventDefault();
+      var tira = a.closest(".bi-tira");
+      fotos = [].map.call(tira.querySelectorAll(".bi-foto"),
+                          function (x) { return x.getAttribute("href"); });
+      dia = a.getAttribute("data-dia") || "";
+      v.hidden = false;
+      mostrar(Number(a.getAttribute("data-i")) || 0);
+    });
+    ant.addEventListener("click", function () { mostrar(k - 1); });
+    sig.addEventListener("click", function () { mostrar(k + 1); });
+    v.querySelector(".bi-visor-x").addEventListener("click", cerrar);
+    v.addEventListener("click", function (ev) { if (ev.target === v) cerrar(); });
+    window.addEventListener("keydown", function (ev) {
+      if (v.hidden) return;
+      if (ev.key === "Escape") { cerrar(); ev.stopPropagation(); ev.preventDefault(); }
+      else if (ev.key === "ArrowLeft") { mostrar(k - 1); ev.preventDefault(); }
+      else if (ev.key === "ArrowRight") { mostrar(k + 1); ev.preventDefault(); }
+    }, true);
+    var x0 = null;
+    v.addEventListener("touchstart", function (ev) { x0 = ev.touches[0].clientX; },
+                       {passive: true});
+    v.addEventListener("touchend", function (ev) {
+      if (x0 === null) return;
+      var dx = ev.changedTouches[0].clientX - x0;
+      x0 = null;
+      if (Math.abs(dx) > 40) mostrar(dx < 0 ? k + 1 : k - 1);
+    });
+  },
+
+  conectar: function () {
+    var self = this;
+    self._visor();
+    document.querySelectorAll("#hoja .st-tarj").forEach(function (el) {
+      var abrir = function () {
+        var id = el.getAttribute("data-obra");
+        self._abierto = (self._abierto === id) ? "" : id;
+        pintar();
+        if (self._abierto) {
+          setTimeout(function () {
+            var l = document.querySelector("#hoja .st-lista");
+            if (l) l.scrollIntoView({behavior: "smooth", block: "start"});
+          }, 60);
+        }
+      };
+      el.addEventListener("click", abrir);
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); }
+      });
+    });
+    document.querySelectorAll("#hoja .st-pill[data-tipo]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        self._tipo = el.getAttribute("data-tipo") || "";
+        pintar();
+      });
+    });
+    var b = document.getElementById("bi-busca");
+    if (b) {
+      b.addEventListener("input", function () {
+        self._busca = b.value;
+        var pos = b.selectionStart;
+        pintar();
+        var n = document.getElementById("bi-busca");
+        if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+    var x = document.querySelector("#hoja .st-cerrar");
+    if (x) x.addEventListener("click", function () { self._abierto = ""; pintar(); });
+  }
+};
+</script>
+</body>
+</html>

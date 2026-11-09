@@ -1,0 +1,379 @@
+{
+  "indicadores": [
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 1,
+      "indicador": "% incremento ventas",
+      "objetivo": "Aumentar los ingresos",
+      "meta": 16000000.0,
+      "unidad": "S/.",
+      "fuente": "AXION · ventas cerradas"
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 2,
+      "indicador": "N° de unidades vendidas",
+      "objetivo": "Unidades vendidas",
+      "meta": 192.0,
+      "unidad": "N°",
+      "fuente": "AXION · ventas cerradas"
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 3,
+      "indicador": "N° de captaciones",
+      "objetivo": "Captación de propiedades",
+      "meta": 240.0,
+      "unidad": "N°",
+      "fuente": "AXION · propiedades"
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 4,
+      "indicador": "N° de créditos hipotecarios",
+      "objetivo": "Créditos hipotecarios",
+      "meta": 3.0,
+      "unidad": "N°",
+      "fuente": "AXION · créditos"
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 5,
+      "indicador": "N° unidades vendidas en Habitat Concept",
+      "objetivo": "Propiedades vendidas",
+      "meta": 24.0,
+      "unidad": "N°",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 6,
+      "indicador": "% incremento de rentabilidad",
+      "objetivo": "Incremento de la rentabilidad",
+      "meta": 100.0,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 7,
+      "indicador": "% de reducción de costos",
+      "objetivo": "Reducción de costos",
+      "meta": 100.0,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 8,
+      "indicador": "Flujo de caja real vs proyectado",
+      "objetivo": "Cobertura de flujo de caja",
+      "meta": 100.0,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 9,
+      "indicador": "Rentabilidad por obra",
+      "objetivo": "Conocer el margen real de cada una de las 18 obras",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "parcial · costo del módulo de movimientos",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Finanzas",
+      "orden": 10,
+      "indicador": "Rentabilidad por razón social",
+      "objetivo": "Conocer el margen real de cada empresa del grupo",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "parcial · costo del módulo de movimientos",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Obra",
+      "orden": 11,
+      "indicador": "Avance físico vs gasto ejecutado",
+      "objetivo": "Que lo construido corresponda a lo gastado",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "AXION · avance de obra + módulo de movimientos",
+      "propuesto": true,
+      "nota": "El indicador central del sector (curva S). Si el gasto crece más rápido que el avance, se está pagando por adelantado."
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Obra",
+      "orden": 12,
+      "indicador": "Costo por m² ejecutado",
+      "objetivo": "Controlar el costo unitario de construcción",
+      "meta": null,
+      "unidad": "S/.",
+      "fuente": "módulo de movimientos + área de las unidades",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Obra",
+      "orden": 13,
+      "indicador": "Cumplimiento cronograma",
+      "objetivo": "Cumplir el cronograma de obra",
+      "meta": 95.0,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Obra",
+      "orden": 14,
+      "indicador": "N° de incidencias",
+      "objetivo": "Reducir incidencias",
+      "meta": 10.0,
+      "unidad": "N°",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Obra",
+      "orden": 15,
+      "indicador": "N° de retrabajos (referencia 2025: 19)",
+      "objetivo": "Reducir retrabajos",
+      "meta": 10.0,
+      "unidad": "N°",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Marketing y Ventas",
+      "orden": 16,
+      "indicador": "Leads captados por campaña",
+      "objetivo": "Saber de dónde viene cada cliente",
+      "meta": null,
+      "unidad": "N°",
+      "fuente": "KOMMO · campaña cargada en el 98.4%",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Marketing y Ventas",
+      "orden": 17,
+      "indicador": "Tasa de conversión de lead a venta",
+      "objetivo": "Mejorar la conversión del embudo",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "KOMMO · embudo Habitat Inmobiliaria",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Marketing y Ventas",
+      "orden": 18,
+      "indicador": "Tiempo de atención al lead",
+      "objetivo": "Contestar antes que la competencia",
+      "meta": null,
+      "unidad": "horas",
+      "fuente": "KOMMO · primera llamada menos creación",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Marketing y Ventas",
+      "orden": 19,
+      "indicador": "% ventas por referidos",
+      "objetivo": "Ventas por referidos",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "parcial · origen vacío en 77 de 150 ventas"
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Marketing y Ventas",
+      "orden": 20,
+      "indicador": "Costo de captación por lead",
+      "objetivo": "Saber cuánto cuesta traer un cliente",
+      "meta": null,
+      "unidad": "S/.",
+      "fuente": null,
+      "nota": "Hay denominador (7,800 leads); falta el numerador: la inversión real de marketing."
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Logística",
+      "orden": 21,
+      "indicador": "Órdenes de compra por obra",
+      "objetivo": "Trazar la compra hasta la obra",
+      "meta": null,
+      "unidad": "N°",
+      "fuente": "AXION · órdenes de compra",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Logística",
+      "orden": 22,
+      "indicador": "Concentración de proveedores",
+      "objetivo": "No depender de un solo proveedor",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "AXION · órdenes de compra + proveedores",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Logística",
+      "orden": 23,
+      "indicador": "N° de proveedores nuevos",
+      "objetivo": "Ampliar la base de proveedores",
+      "meta": null,
+      "unidad": "N°",
+      "fuente": "AXION · proveedores"
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Logística",
+      "orden": 24,
+      "indicador": "Lead time de compra",
+      "objetivo": "Reducir el tiempo entre pedido y recepción",
+      "meta": null,
+      "unidad": "días",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Procesos Internos",
+      "area": "Logística",
+      "orden": 25,
+      "indicador": "Exactitud de inventario",
+      "objetivo": "Que el stock del sistema sea el real",
+      "meta": null,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Cobranza",
+      "orden": 26,
+      "indicador": "% de recuperación de lo vencido",
+      "objetivo": "Cobrar lo que ya venció",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "AXION · cuotas por mes de vencimiento",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Cobranza",
+      "orden": 27,
+      "indicador": "Saldo vencido a más de 90 días",
+      "objetivo": "Reducir la morosidad antigua",
+      "meta": null,
+      "unidad": "S/.",
+      "fuente": "AXION · cuotas vencidas",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Finanzas",
+      "area": "Cobranza",
+      "orden": 28,
+      "indicador": "Créditos sin cronograma cargado",
+      "objetivo": "Que toda la deuda tenga fecha de cobro",
+      "meta": 0.0,
+      "unidad": "N°",
+      "fuente": "AXION · créditos y cuotas",
+      "propuesto": true
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Cobranza",
+      "orden": 29,
+      "indicador": "Tasa de retención de clientes",
+      "objetivo": "Retención de clientes",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "parcial · conteo, no porcentaje"
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Cobranza",
+      "orden": 30,
+      "indicador": "% incremento de clientes nuevos",
+      "objetivo": "Incrementar clientes nuevos",
+      "meta": null,
+      "unidad": "%",
+      "fuente": "parcial · no hay fecha de alta de cliente"
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Gerencia",
+      "orden": 31,
+      "indicador": "N° de reclamos (referencia 2025: 19)",
+      "objetivo": "Reducir reclamos",
+      "meta": null,
+      "unidad": "N°",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Clientes",
+      "area": "Marketing y Ventas",
+      "orden": 32,
+      "indicador": "Tasa de visibilidad de marca",
+      "objetivo": "Visibilidad de marca",
+      "meta": null,
+      "unidad": "%",
+      "fuente": null,
+      "retirado": "no tiene definición medible acordada"
+    },
+    {
+      "perspectiva": "Aprendizaje y Crecimiento",
+      "area": "Gerencia",
+      "orden": 33,
+      "indicador": "% de capacitaciones realizadas",
+      "objetivo": "Capacitación del equipo",
+      "meta": null,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Aprendizaje y Crecimiento",
+      "area": "Gerencia",
+      "orden": 34,
+      "indicador": "Índice de clima laboral",
+      "objetivo": "Clima laboral",
+      "meta": null,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Aprendizaje y Crecimiento",
+      "area": "Gerencia",
+      "orden": 35,
+      "indicador": "Nivel de adopción digital",
+      "objetivo": "Adopción digital",
+      "meta": null,
+      "unidad": "%",
+      "fuente": null
+    },
+    {
+      "perspectiva": "Aprendizaje y Crecimiento",
+      "area": "Gerencia",
+      "orden": 36,
+      "indicador": "Tasa de innovación en proyectos",
+      "objetivo": "Innovación en proyectos",
+      "meta": null,
+      "unidad": "%",
+      "fuente": null
+    }
+  ]
+}

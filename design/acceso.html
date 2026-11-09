@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+
+<meta name="theme-color" content="#163180">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icono-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Habitat">
+<title>Acceso · Habitat Cockpit</title>
+
+<style>
+  :root{
+    --navy-700:#163180; --navy-800:#122763; --navy-900:#0d1b45; --navy-950:#081029;
+    --navy-200:#b9c5e9; --navy-300:#8b9edb;
+    --amarillo:#fcd925; --amarillo-600:#eac40a;
+    --blanco:#fff; --gris-50:#f6f7fb; --gris-200:#dfe3ec; --gris-300:#c6cdda;
+    --gris-500:#6b7488; --gris-700:#333a4a; --rojo:#c62a22; --rojo-bg:#fcebea;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:"Segoe UI",system-ui,-apple-system,sans-serif;color:var(--gris-700);
+    background:var(--navy-900);-webkit-font-smoothing:antialiased}
+
+
+  .escena{min-height:100%;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.9fr)}
+  .marca,.puerta{min-width:0}
+
+
+  .marca{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;
+    padding:48px 32px;color:var(--blanco);
+    background:
+      radial-gradient(900px 600px at 20% 15%, rgba(252,217,37,.14), transparent 60%),
+      radial-gradient(700px 500px at 85% 90%, rgba(139,158,219,.22), transparent 60%),
+      linear-gradient(160deg, var(--navy-700) 0%, var(--navy-900) 55%, var(--navy-950) 100%)}
+
+  .marca::before{content:"";position:absolute;inset:0;
+    background-image:radial-gradient(rgba(255,255,255,.13) 1px, transparent 1.5px);
+    background-size:26px 26px;opacity:.55;
+    -webkit-mask-image:radial-gradient(600px 480px at 50% 45%, #000 30%, transparent 100%);
+            mask-image:radial-gradient(600px 480px at 50% 45%, #000 30%, transparent 100%)}
+  .marca-cuerpo{position:relative;text-align:center;max-width:560px}
+  .marca img{width:min(240px,60vw);height:auto;display:block;margin:0 auto 28px;
+    filter:drop-shadow(0 12px 32px rgba(0,0,0,.35))}
+  .marca h1{font-size:clamp(28px,3.2vw,40px);font-weight:800;letter-spacing:-.02em;line-height:1.1}
+  .marca h1 span{display:block;font-size:clamp(14px,1.2vw,17px);font-weight:600;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--amarillo);margin-top:14px}
+  .marca .linea{width:56px;height:4px;background:var(--amarillo);border-radius:2px;margin:26px auto}
+  .marca p{color:var(--navy-200);font-size:15px;line-height:1.55;max-width:420px;margin:0 auto}
+  .marca .pie{position:absolute;left:0;right:0;bottom:22px;text-align:center;
+    font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--navy-300)}
+
+
+  .puerta{background:var(--gris-50);display:flex;align-items:center;justify-content:center;padding:48px 32px}
+  .tarjeta{width:100%;max-width:400px;background:var(--blanco);border:1px solid var(--gris-200);
+    border-radius:16px;padding:36px 36px 30px;box-shadow:0 24px 60px rgba(13,27,69,.10)}
+  .tarjeta .overline{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gris-500);
+    font-weight:600}
+  .tarjeta h2{font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--navy-900);margin:6px 0 26px}
+  label{display:block;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--gris-500);margin:0 0 6px}
+  input{width:100%;font:inherit;font-size:15px;color:var(--navy-900);
+    border:1.5px solid var(--gris-300);border-radius:8px;padding:12px 14px;background:var(--blanco);
+    outline:none;transition:border-color .15s, box-shadow .15s}
+  input:focus{border-color:var(--navy-700);box-shadow:0 0 0 4px rgba(22,49,128,.12)}
+  .campo{margin-bottom:18px}
+  button{width:100%;font:inherit;font-size:15px;font-weight:700;letter-spacing:.02em;
+    color:var(--navy-900);background:var(--amarillo);border:0;border-radius:8px;padding:13px 16px;
+    cursor:pointer;margin-top:8px;transition:background .15s, transform .05s}
+  button:hover{background:var(--amarillo-600)}
+  button:active{transform:translateY(1px)}
+  .error{display:flex;gap:10px;align-items:flex-start;background:var(--rojo-bg);color:var(--rojo);
+    border-left:4px solid var(--rojo);border-radius:8px;padding:10px 12px;font-size:13px;
+    line-height:1.45;margin:0 0 18px}
+  .error b{font-weight:700}
+  .nota{margin-top:22px;font-size:12px;color:var(--gris-500);line-height:1.5;text-align:center}
+
+
+  @media (max-width:760px){
+    .escena{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+    .marca-cuerpo{max-width:100%}
+    .marca p{max-width:100%}
+    .marca{padding:40px 24px 44px}
+    .marca img{width:150px;margin-bottom:18px}
+    .marca .linea{margin:18px auto}
+    .marca p{font-size:14px}
+    .marca .pie{display:none}
+    .puerta{padding:28px 20px 40px;align-items:flex-start}
+    .tarjeta{padding:28px 24px 24px}
+  }
+</style>
+</head>
+<body>
+<div class="escena">
+
+  <section class="marca" aria-label="Habitat Inmobiliaria">
+    <div class="marca-cuerpo">
+      <img src="data:image/png;base64,__LOGO__" alt="Habitat Inmobiliaria">
+      <h1>Habitat Inmobiliaria<span>Cockpit de Rentabilidad</span></h1>
+      <div class="linea"></div>
+      <p>Ventas, cobranza, caja y obra del grupo en una sola pantalla, con la fecha y la fuente de cada cifra.</p>
+    </div>
+    <div class="pie">Huancayo · Perú</div>
+  </section>
+
+  <section class="puerta">
+    <form class="tarjeta" method="post" action="/acceso" autocomplete="on">
+      <div class="overline">Acceso</div>
+      <h2>Ingresar</h2>
+      __ERROR__
+      <div class="campo">
+        <label for="usuario">Usuario</label>
+        <input id="usuario" name="usuario" type="text" value="__USUARIO__"
+               autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+      </div>
+      <div class="campo">
+        <label for="clave">Contraseña</label>
+        <input id="clave" name="clave" type="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit">Entrar</button>
+      <div class="nota">Acceso reservado a Habitat Inmobiliaria.<br>Si no tiene usuario, pídalo a quien administra el tablero.</div>
+    </form>
+  </section>
+
+</div>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("/sw.js", {scope: "/", updateViaCache: "none"})
+      .catch(function () {});
+  });
+}
+</script>
+</body>
+</html>

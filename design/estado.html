@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estado · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <div class="hoja-nombre" id="hoja-nombre">Estado</div>
+    <div class="cabecera-der" id="cab-der">cargando…</div>
+  </div></header>
+  <div class="barra-fija">
+    <nav class="nav" id="nav"></nav>
+    <nav class="subnav" id="subnav" style="display:none"></nav>
+    <div class="filtros">
+      <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+      <div class="filtro"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+      <div class="filtro"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+      <button class="btn-act" id="btn-act">Actualizar ahora</button>
+    </div>
+  </div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "estado",
+  nombre: "Estado",
+  pregunta: "¿La información está actualizada y qué falta cargar?",
+  fuentes: ["AXION", "KOMMO"],
+
+  pintar: function (M, D) {
+    var h = this.actualizacion(D) + seccionControles() + this.cola(D) +
+            this.flujo(D) + seccionEntreCuentas() + this.hallazgos(M, D);
+    setTimeout(engancharEntreCuentas, 0);
+    setTimeout(engancharControles, 0);
+    return h;
+  },
+
+  actualizacion: function (D) {
+    var fs = D.fuentes || [];
+    var h = cabSeccion("La información de esta pantalla",
+      "de dónde sale y cuándo se leyó · el tablero se regenera solo cada 30 minutos",
+      "estado-fuentes");
+    h += '<div class="rejilla-4">';
+    fs.forEach(function (f) {
+      var viva = f.conectada !== false;
+      h += '<div class="tarjeta"><span class="k">' + esc(f.nombre) + '</span>' +
+        '<div class="v" style="font-size:var(--t-h3)">' +
+          (viva ? esc(String(f.fecha || "").slice(0, 16)) : "sin conexión") + '</div>' +
+        '<div class="n">' + esc(f.periodo || "") + '</div>' +
+        ((f.detalle || []).length
+          ? '<div class="n" style="margin-top:var(--e2)" ' +
+            'data-tecnico="las entidades de AXION, tal como se llaman ahi">' +
+            textoOtros((f.detalle || []).map(esc), 4) + '</div>'
+          : "") +
+        '</div>';
+    });
+    h += '</div>';
+
+    var avisos = fs.filter(function (f) { return f.aviso; });
+    avisos.forEach(function (f) {
+      h += '<div class="hallazgo" style="margin-top:var(--e4)">' +
+        '<span class="q">' + esc(f.nombre) + ' · no todo se pudo leer en esta corrida</span>' +
+        esc(f.aviso) +
+        '<span class="quien">La cifra que dependa de esa tabla es de la lectura ' +
+        'anterior, no de hoy</span></div>';
+    });
+
+    var conFalta = fs.filter(function (f) { return (f.faltantes || []).length; });
+    if (conFalta.length) {
+      h += '<div class="tarjeta" style="margin-top:var(--e4);padding:var(--e4) var(--e2)">' +
+        '<div class="regla">Lo que estas fuentes <b>todavía no traen</b>. No es una ' +
+        'falla de lectura: es carga que falta del lado de Habitat, y cada línea dice ' +
+        'qué indicador queda sin poder calcularse por eso.</div>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Fuente</th><th>Qué falta</th></tr></thead><tbody>';
+      conFalta.forEach(function (f) {
+        (f.faltantes || []).forEach(function (t, i) {
+          h += '<tr><td class="obra">' + (i === 0 ? esc(f.nombre) : "") + '</td>' +
+            '<td>' + esc(t) + '</td></tr>';
+        });
+      });
+      h += '</tbody></table></div></div>';
+    }
+
+    h += '<p class="linea-meta">El archivo de datos se generó el <b>' +
+      esc(String(D.generado || D.publicado || "")) + '</b>. ' +
+      'El botón «Actualizar ahora» vuelve a leer las fuentes y rehace la pantalla; ' +
+      'si una corrida falla, se sigue mostrando la última lectura buena con su fecha, ' +
+      'nunca un cero' +
+      (avisos.length ? ' — y queda dicho arriba cuál fue' : '') + '.</p>';
+    return h + '</section>';
+  },
+
+  cola: function (D) {
+    var c = D.cola || {};
+    if (!c.hay) return "";
+    var q = c.cola || {}, sc = c.sin_caja || {}, ca = c.casados || {};
+
+    var h = cabSeccion("Lo que entró a caja y falta registrar en cuentas por cobrar",
+      "la bandeja de entrada de Contabilidad · " + ent(q.filas) +
+      " ingresos esperando · clic para abrir la lista", "estado-cola");
+
+    h += '<div class="rejilla-4">' +
+      '<div class="tarjeta abrible" data-abre="cola-lista" aria-expanded="false" ' +
+        'tabindex="0" role="button">' +
+        '<span class="k">Esperando registro</span>' +
+        '<div class="v">' + soles(q.monto) + '</div>' +
+        '<div class="n">' + ent(q.filas) + ' ingresos que el libro de caja registra y ' +
+        'cuentas por cobrar no tiene atados a ninguna cuota</div>' +
+        '<div class="abrir"><span>Ver la lista</span><span class="flecha">▸</span></div>' +
+      '</div>' +
+      '<div class="tarjeta"><span class="k">El más viejo</span>' +
+        '<div class="v"' + (q.dias_mas_viejo > 30 ? ' style="color:var(--rojo)"' : '') + '>' +
+        ent(q.dias_mas_viejo) + ' días</div>' +
+        '<div class="n">entró el ' + esc(q.mas_viejo) + ' y sigue sin registrarse</div></div>' +
+      '<div class="tarjeta abrible" data-abre="cola-sincaja" aria-expanded="false" ' +
+        'tabindex="0" role="button">' +
+        '<span class="k">Registrado sin respaldo en caja</span>' +
+        '<div class="v">' + soles(sc.monto) + '</div>' +
+        '<div class="n">' + ent(sc.filas) + ' pagos anotados en cuentas por cobrar sin ' +
+        'un ingreso de caja que los respalde</div>' +
+        '<div class="abrir"><span>Ver la lista</span><span class="flecha">▸</span></div>' +
+      '</div>' +
+      '<div class="tarjeta"><span class="k">Ya cuadrado</span>' +
+        '<div class="v">' + soles(ca.monto) + '</div>' +
+        '<div class="n">' + ent(ca.filas) + ' cobros que están en los dos lados · ' +
+        'el circuito funcionando</div></div>' +
+      '</div>';
+
+    h += '<div class="hallazgo" style="margin-top:var(--e4)">' +
+      '<span class="q">Por qué estas dos listas son un techo y no una cifra exacta</span>' +
+      'AXION <b>no guarda a qué venta pertenece un ingreso de caja</b> — el formulario ' +
+      'solo tiene «de quién recibió», texto libre—. Así que el cruce se hace por ' +
+      '<b>monto igual y hasta ' + ent(c.dias_tolerancia) + ' días de diferencia</b>. ' +
+      'Un cliente que paga tres cuotas y el banco las deposita juntas, o un voucher ' +
+      'depositado semanas después, no casan y caen en estas listas sin estar mal. ' +
+      'Se resuelve del lado de AXION, agregando el vínculo.</div>';
+
+    if ((q.antiguedad || []).length) {
+      h += '<div class="tarjeta" style="margin-top:var(--e4);padding:var(--e4) var(--e2)">' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cuánto lleva esperando</th><th class="num">Ingresos</th>' +
+        '<th class="num">Monto</th></tr></thead><tbody>';
+      q.antiguedad.forEach(function (a) {
+        var viejo = a.tramo.indexOf("90") >= 0;
+        h += '<tr><td class="obra">' + esc(a.tramo) + '</td>' +
+          '<td class="num">' + ent(a.filas) + '</td>' +
+          '<td class="num"' + (viejo ? ' style="color:var(--rojo)"' : '') + '>' +
+          soles(a.monto) + '</td></tr>';
+      });
+      h += '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + ent(q.filas) + '</td>' +
+        '<td class="num">' + soles(q.monto) + '</td></tr>' +
+        '</tbody></table></div></div>';
+    }
+
+    h += '<div class="detalle" id="det-cola-lista"></div>' +
+      '<div class="detalle" id="det-cola-sincaja"></div>';
+    return h + '</section>';
+  },
+
+  flujo: function (D) {
+    var f = D.flujo || {}, ec = D.entre_cuentas || {};
+    var ms = f.meses || [];
+    if (!ms.length) return "";
+    var porMes = {};
+    (ec.por_mes || []).forEach(function (m) { porMes[m.mes] = m; });
+
+    var h = cabSeccion("El flujo del año, mes a mes",
+      "lo cobrado, lo gastado, y lo que se movió entre cuentas · los dos netos, " +
+      "porque contestan preguntas distintas", "estado-flujo");
+    h += '<div class="tarjeta" style="padding:var(--e4) var(--e2)">' +
+      '<div class="envoltura-tabla sin-tope"><table class="datos"><thead><tr>' +
+      '<th>Mes</th><th class="num">Cobrado</th><th class="num">Gastos de caja</th>' +
+      '<th class="num">Neto operativo</th><th class="num">Entre cuentas</th>' +
+      '<th class="num">Neto de caja</th></tr></thead><tbody>';
+    var tC = 0, tG = 0, tE = 0;
+    ms.forEach(function (m) {
+      if (!(m.entro || m.salio)) return;
+      var e = (porMes[m.mes] || {}).monto || 0;
+      var no = (m.entro || 0) - (m.salio || 0);
+      tC += m.entro || 0; tG += m.salio || 0; tE += e;
+      h += '<tr><td class="obra">' + esc(m.etiqueta) + '</td>' +
+        '<td class="num">' + (m.entro ? soles(m.entro) : '<span class="raya">—</span>') + '</td>' +
+        '<td class="num">' + (m.salio ? soles(m.salio) : '<span class="raya">—</span>') + '</td>' +
+        '<td class="num"' + (no < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+          soles(no) + '</td>' +
+        '<td class="num">' + (e ? soles(e) : '<span class="raya">—</span>') + '</td>' +
+        '<td class="num"><b' + (no + e < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+          soles(no + e) + '</b></td></tr>';
+    });
+    h += '<tr class="total"><td class="obra">TOTAL DEL AÑO</td>' +
+      '<td class="num">' + soles(tC) + '</td>' +
+      '<td class="num">' + soles(tG) + '</td>' +
+      '<td class="num"' + (tC - tG < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        soles(tC - tG) + '</td>' +
+      '<td class="num">' + soles(tE) + '</td>' +
+      '<td class="num"><b>' + soles(tC - tG + tE) + '</b></td></tr>' +
+      '</tbody></table></div></div>';
+
+    var tL = 0;
+    ms.forEach(function (m) {
+      if (m.entro || m.salio) tL += m.cobros_libro || 0;
+    });
+    var dif = tL - tC;
+    if (dif > 0) {
+      h += '<div class="hallazgo" style="margin-top:var(--e4)">' +
+        '<span class="q">De qué libro sale cada columna, antes de leer los netos</span>' +
+        '<b>Cobrado ' + soles(tC) + '</b> sale de <b>cuentas por cobrar</b> —lo que ' +
+        'Cobranzas anotó contra la cuota de un cliente—. <b>Gastos de caja ' +
+        soles(tG) + '</b> sale del <b>Registro de Movimientos</b>, que es otro libro. ' +
+        'Ese mismo Registro anota <b>' + soles(tL) + '</b> de cobros: <b>' +
+        soles(dif) + ' más</b> que cuentas por cobrar. ' +
+        'Restando los dos lados del Registro —el único par consistente— el año da ' +
+        '<b>' + soles(tL - tG) + '</b> en vez de ' + soles(tC - tG) + '. ' +
+        'El tablero publica lo de Cobranzas, así se acordó; los dos números son ' +
+        'ciertos y miden poblaciones distintas.' +
+        '<span class="quien">Contabilidad y Administración · registrar contra la cuota ' +
+        'lo que ya entró por caja (es la cola de arriba)</span></div>';
+    }
+
+    h += '<div class="hallazgo" style="margin-top:var(--e4)">' +
+      '<span class="q">Los dos netos dicen cosas distintas, y el segundo tiene trampa</span>' +
+      '<b>Neto operativo ' + soles(tC - tG) + '</b> contesta si el negocio se paga ' +
+      'con lo que cobra. <b>Neto de caja ' + soles(tC - tG + tE) + '</b> contesta cómo ' +
+      'cerró el banco — pero suma dinero que salió de otra cuenta del propio grupo. ' +
+      '<b>Si esa cuenta también es de Habitat, el grupo no ganó nada: movió dinero de ' +
+      'bolsillo.</b> Por eso el que manda es el primero, y este va acá y no en la ' +
+      'portada.' +
+      '<span class="quien">Administración · de dónde salió cada retiro</span></div>';
+    return h + '</section>';
+  },
+
+  hallazgos: function (M, D) {
+    var E = (M && M.estructura) || {};
+    var L = [];
+
+    if (E.sin_credito_con_ingreso) {
+      L.push({
+        q: "Ventas cobradas que no están cargadas en cuentas por cobrar",
+        cif: ent(E.sin_credito_con_ingreso) + " ventas · " + soles(E.monto_sin_cargar),
+        txt: "el módulo de ventas dice que estas ventas ya recibieron dinero, y cuentas " +
+          "por cobrar no tiene ningún pago de ellas. Por eso figuran en cero en toda la " +
+          "hoja Resultados.",
+        area: "Contabilidad · registrar el pago contra su cuota"
+      });
+    }
+    if (E.sin_credito) {
+      L.push({
+        q: "Ventas cuyo cobro no se puede leer en ningún lado",
+        cif: ent(E.sin_credito) + " ventas · " + soles(E.monto_sin_credito),
+        txt: "no tienen nada cargado en cuentas por cobrar y el módulo de ventas tampoco " +
+          "registra dinero entregado. Quedan fuera de los dos lados del porcentaje de " +
+          "cobro: no dice que no hayan pagado, dice que no hay dónde verlo.",
+        area: "Comercial · cargar el crédito de la venta"
+      });
+    }
+    var fu = (D.flujo || {}).futuros || {};
+    if (fu.n && fu.monto) {
+      var d0 = (fu.detalle || [])[0] || {};
+      L.push({
+        q: "Pagos con fecha posterior a hoy dentro de lo cobrado",
+        cif: ent(fu.n) + (fu.n === 1 ? " pago · " : " pagos · ") + soles(fu.monto),
+        txt: "están fechados después de hoy y ya cuentan en el «Cobrado» del año como si " +
+          "hubieran entrado" + (d0.fecha ? " (" + esc(d0.quien || "") + ", " +
+          esc(d0.fecha) + ")" : "") + ". O son pagos programados cargados como cobrados, " +
+          "o la fecha está mal tipeada.",
+        area: "Contabilidad · confirmar la fecha del pago"
+      });
+    }
+    var cz = D.cobrado_cero || [];
+    if (cz.length) {
+      L.push({
+        q: "Pagos cargados con monto en cero",
+        cif: ent(cz.length) + (cz.length === 1 ? " pago" : " pagos"),
+        txt: "el pago existe en cuentas por cobrar pero su monto está vacío (" +
+          textoOtros(cz.map(function (x) {
+            return esc(x.cliente || "—") + ", " + esc(x.tipo || "—") + " del " +
+              esc(x.fecha || "—") + " en " + esc(x.obra || "—");
+          }), 3) +
+          "). No cambia ningún total —cero no suma— pero es una fila mal cargada, y " +
+          "descartarla en silencio esconde el problema.",
+        area: "Contabilidad · completar el monto"
+      });
+    }
+    var gf = D.gasto_fuera || {};
+    if (gf.hay && gf.monto) {
+      L.push({
+        q: "Gasto que salió a proyectos que no emparejan ninguna obra",
+        cif: ent(gf.movimientos) + " movimientos de " + esc(String(D.flujo.anio)) +
+          " · " + soles(gf.monto),
+        txt: "se fue a " + esc((gf.proyectos || []).slice(0, 2).join(" y ") ||
+          "proyectos ajenos") + ", cuyos rótulos no emparejan ninguna obra de AXION. " +
+          "En su mayoría compras de dólares enviadas afuera. El dinero salió de verdad, " +
+          "así que se cuenta en la caja — pero el signo del resultado del año depende de ella. " +
+          "Medido el 20-ago-2026: Miami no existe como obra; «Chancay» coincide con la " +
+          "ubicación de LA PRADERA DE QUEPEPAMPA (anteproyecto, 79 unidades) — si esos " +
+          "gastos son de esa obra, su costo hoy está fuera del margen. " +
+          (((D.gasto_fuera_hist || {}).monto || 0) > (gf.monto || 0) + 0.5
+            ? "Contando todos los años del libro son " +
+              soles(D.gasto_fuera_hist.monto) + " en " +
+              ent(D.gasto_fuera_hist.movimientos) + " movimientos."
+            : ""),
+        area: "Gerencia · decidir si entra en el resultado del grupo · " +
+          "Administración · ¿los gastos «Chancay» son de LA PRADERA DE QUEPEPAMPA?"
+      });
+    }
+    var mv = (D.movimientos || {}).resumen || {};
+    if (mv.gasto_sin_atribuir) {
+      var sa = (D.movimientos || {}).sin_atribuir || [];
+      var conNombre = sa.filter(function (x) {
+        var p = String(x.proyecto || "").trim();
+        return p && p !== "(vacío)" && p !== "—";
+      }).slice(0, 4).map(function (x) { return x.proyecto; });
+      L.push({
+        q: "Gasto que no se puede repartir por obra",
+        cif: soles(mv.gasto_sin_atribuir) +
+          (mv.periodo ? " · " + esc(mv.periodo) : ""),
+        txt: "de " + soles((mv.gasto || {}).monto) + " de gasto del libro de caja, " +
+          "esto no cae en ninguna de las obras de AXION. " +
+          (conNombre.length
+            ? "Parte viene con el campo «proyecto» vacío y parte trae un nombre que " +
+              "no existe como obra en AXION —" + esc(conNombre.join(", ")) + "—: " +
+              "son dos problemas distintos y el segundo no se arregla llenando un campo. "
+            : "El campo «proyecto» del movimiento viene vacío. ") +
+          "Sin esto no hay margen por obra que valga. " +
+          "Ojo con la ventana: esta cifra cubre " + esc(mv.periodo || "todo el libro") +
+          ", no solo el año que muestra la tabla de arriba.",
+        area: "Administración · completar el proyecto, y Gerencia · decidir si esos " +
+          "nombres son obras que faltan crear en AXION"
+      });
+    }
+
+    var fl = D.flujo || {}, dp = fl.diagnostico_presupuesto || {};
+    var acu = fl.acumulado || {}, res = (D.movimientos || {}).resumen || {};
+
+    if (dp.total_filas) {
+      L.push({
+        q: "Lo cargado como «presupuesto» no es un plan",
+        cif: soles((res.presupuesto || {}).monto) + " en " + ent(dp.total_filas) +
+             " movimientos · todo el libro" +
+             (res.periodo ? ", " + esc(res.periodo) : ""),
+        txt: "en " + ent(dp.meses) + " meses el presupuesto del mes coincide con el gasto " +
+          "real casi al céntimo — " + esc(dp.ejemplo_mes) + ": " + soles(dp.ejemplo_presu) +
+          " de presupuesto contra " + soles(dp.ejemplo_gasto) + " de gasto, " +
+          soles(dp.ejemplo_dif) + " de diferencia. " + ent(dp.sin_obra) + " de los " +
+          ent(dp.total_filas) + " no llevan obra, y sus conceptos son traspasos entre " +
+          "cuentas del grupo. Además viajan marcados como «Ingreso», junto a las ventas " +
+          "reales. " + (acu.presupuesto ? "En " + esc(String(fl.anio)) + " solo son " +
+          soles(acu.presupuesto) + ". " : "") +
+          "Esto no se arregla cargando mejor: hoy no se presupuesta.",
+        area: "Gerencia · decidir si se va a presupuestar, y Administración · corregir la marca en AXION"
+      });
+    }
+
+    if (acu.entro !== undefined && acu.entro !== null &&
+        fl.cobros_del_libro !== undefined && fl.cobros_del_libro !== null &&
+        fl.cobros_del_libro - acu.entro > 0) {
+      L.push({
+        q: "Dos módulos del mismo AXION cuentan cobros distintos para los mismos meses",
+        cif: soles(fl.cobros_del_libro - acu.entro) + " de diferencia · " +
+             esc(String(fl.anio)),
+        txt: "Cobranzas anotó " + soles(acu.entro) + " contra la cuota de un cliente y " +
+          "Administración anotó " + soles(fl.cobros_del_libro) + " en la caja, los dos en " +
+          "AXION y sobre los mismos meses. No son dos fuentes distintas: es el mismo " +
+          "sistema con dos coberturas. El tablero publica el primero —así se acordó— y " +
+          "muestra el segundo acá para que la diferencia no quede escondida.",
+        area: "Cobranza · registrar el crédito y los pagos de cada venta"
+      });
+    }
+
+    ((D.movimientos || {}).avisos || []).forEach(function (a) {
+      if (String(a.etiqueta || "").indexOf("categoría") < 0) return;
+      L.push({
+        q: "Movimientos sin categoría cargada",
+        cif: soles(a.cifra),
+        txt: String(a.texto || "").replace(/<[^>]+>/g, ""),
+        filas: a.filas || [],
+        area: a.area || "Administración · cargar el tipo de movimiento"
+      });
+    });
+
+    var hip = fl.hipotecas || {}, an = (D.movimientos || {}).anio || {};
+    var F = [];
+    if (hip.ventas) F.push({
+      q: "La fecha en que el banco desembolsa cada hipoteca",
+      cif: ent(hip.ventas) + " ventas · " + soles(hip.monto),
+      txt: "esperan al banco y no caen en ningún mes. Por eso «Cuotas del mes sin " +
+        "cobrar» —hoy " + soles(acu.por_entrar) + " en el año— es un piso de lo que " +
+        "viene: solo cuenta las cuotas con cronograma.",
+      area: "Administración · campo nuevo en AXION"
+    });
+    if (an.monto) F.push({
+      q: "El costo por obra, completo",
+      cif: soles(an.atribuido) + " de " + soles(an.monto) + " (" + pct(an.pct_atribuido) +
+           ") en " + esc(String(fl.anio)),
+      txt: "solo eso lleva nombre de obra, y sale del libro de caja. Contando todo el " +
+        "libro son " + soles(res.gasto_atribuido) + " de " + soles((res.gasto || {}).monto) +
+        " (" + pct(res.pct_atribuido) + "), que es otra ventana y no se resta de la de " +
+        "arriba. La tabla Gasto de AXION no tiene columna de proyecto. Sin el costo " +
+        "completo por obra no hay margen que calcular.",
+      area: "Gerencia · carga de costos en AXION"
+    });
+    F.push({
+      q: "Un presupuesto de verdad",
+      cif: "no existe en ninguna fuente",
+      txt: "cuánto planea gastar cada obra cada mes, cargado ANTES de gastarlo. Se buscó " +
+        "en los 73 Excels y en la API: lo único que hay es el presupuesto de una obra que " +
+        "todavía no se construye. Lo que hoy figura como presupuesto son traspasos entre " +
+        "cuentas y coincide con el gasto real, así que no hay contra qué comparar.",
+      area: "Administración · cargar el plan por obra y por mes"
+    });
+
+    if (!L.length && !F.length) return "";
+
+    var norm = function (a) {
+      return String(a || "Sin área").split("·")[0].trim() || "Sin área";
+    };
+    var tablaMovs = function (fs) {
+      var tot = 0;
+      var t = '<details class="mov-lista"><summary>' + ent(fs.length) +
+        ' movimientos, uno por uno</summary><div class="envoltura-tabla">' +
+        '<table class="datos"><thead><tr><th>Fecha</th><th>Cuenta</th><th>Concepto</th>' +
+        '<th>Tipo</th><th class="num">Monto</th></tr></thead><tbody>';
+      fs.forEach(function (f) {
+        tot += f.monto || 0;
+        t += '<tr><td class="gris">' + esc(f.fecha || "—") + '</td>' +
+          '<td>' + esc(f.cuenta || "(sin cuenta)") + '</td>' +
+          '<td class="obra">' + esc(f.concepto || "—") + '</td>' +
+          '<td>' + esc(f.tipo || "—") + '</td>' +
+          '<td class="num">' + soles(f.monto) + '</td></tr>';
+      });
+      return t + '<tr class="total"><td class="obra">TOTAL · ' + ent(fs.length) +
+        ' movimientos</td><td></td><td></td><td></td><td class="num">' + soles(tot) +
+        '</td></tr></tbody></table></div></details>';
+    };
+    var todos = L.map(function (x) { return {x: x, tipo: "corregir"}; })
+                 .concat(F.map(function (x) { return {x: x, tipo: "falta"}; }));
+    var areas = [], porArea = {};
+    todos.forEach(function (t) {
+      var a = norm(t.x.area);
+      if (!porArea[a]) { porArea[a] = []; areas.push(a); }
+      porArea[a].push(t);
+    });
+    areas.sort(function (a, b) { return porArea[b].length - porArea[a].length; });
+
+    var h = cabSeccion("Lo que Habitat tiene que resolver",
+      todos.length + " puntos en " + areas.length + " áreas · " + L.length +
+      " son data cargada que hay que corregir y " + F.length +
+      " son datos que todavía no existen · nada de esto lo toca el tablero: " +
+      "se mide, se muestra y lo resuelve quien lo carga",
+      "estado-hallazgos");
+
+    areas.forEach(function (a) {
+      var g = porArea[a];
+      var nC = g.filter(function (t) { return t.tipo === "corregir"; }).length;
+      var nF = g.length - nC;
+      h += '<div class="tarjeta" style="margin-top:var(--e4)">' +
+        '<span class="overline" style="display:block">' + esc(a) + ' · ' +
+        ent(g.length) + (g.length === 1 ? ' punto' : ' puntos') +
+        (nC ? ' · ' + ent(nC) + ' por corregir' : '') +
+        (nF ? ' · ' + ent(nF) + ' por cargar' : '') + '</span>';
+      g.forEach(function (t) {
+        var x = t.x;
+        h += '<div class="hallazgo" style="margin-top:var(--e3)">' +
+          '<span class="q">' + (t.tipo === "falta" ? "FALTA CARGAR · " : "") +
+          esc(x.q) + '</span>' +
+          '<b>' + x.cif + '</b> — ' + x.txt +
+          ((x.filas && x.filas.length) ? tablaMovs(x.filas) : '') +
+          '<span class="quien">' + esc(x.area) + '</span></div>';
+      });
+      h += '</div>';
+    });
+    return h + '</section>';
+  },
+
+  detalle: function (id) {
+    var c = D.cola || {};
+    var NE = "No existe";
+    var t = '<button class="cerrar">Cerrar</button>';
+    var tx = function (v) {
+      var s = (v === null || v === undefined) ? "" : String(v).trim();
+      return (s === "" || s === "—") ? NE : esc(v);
+    };
+    var filaNE = function (cols) {
+      var r = '<tr>';
+      for (var k = 0; k < cols; k++) r += '<td class="' + (k ? 'num' : 'obra') + '">' + NE + '</td>';
+      return r + '</tr>';
+    };
+    if (id === "cola-lista") {
+      var q = c.cola || {}, f = q.detalle || [];
+      var h = t + '<h3>Ingresos de caja sin registrar en cuentas por cobrar</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Fecha</th><th class="num">Días esperando</th><th>Concepto</th>' +
+        '<th class="num">Monto</th></tr></thead><tbody>';
+      if (!f.length) return h + filaNE(4) + '</tbody></table></div>';
+      f.forEach(function (x) {
+        h += '<tr><td>' + tx(x.fecha) + '</td>' +
+          '<td class="num"' + (x.dias > 90 ? ' style="color:var(--rojo)"' : '') + '>' +
+          (x.dias === null || x.dias === undefined ? NE : ent(x.dias)) + '</td>' +
+          '<td class="obra">' + tx(x.concepto) + '</td>' +
+          '<td class="num">' + (x.monto === null || x.monto === undefined ? NE : soles(x.monto)) +
+          '</td></tr>';
+      });
+      if (f.length < q.filas) {
+        h += '<tr class="total"><td class="obra" colspan="4">TOTAL · ' + ent(q.filas) +
+          ' ingresos · se muestran los ' + ent(f.length) + ' mayores</td></tr>';
+      }
+      return h + '</tbody></table></div>';
+    }
+    if (id === "cola-sincaja") {
+      var s = c.sin_caja || {}, g = s.detalle || [];
+      var h2 = t + '<h3>Pagos en cuentas por cobrar sin respaldo en caja</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Fecha</th><th>Tipo</th><th>Cliente</th><th>Unidad</th>' +
+        '<th class="num">Monto</th></tr></thead><tbody>';
+      if (!g.length) return h2 + filaNE(5) + '</tbody></table></div>';
+      g.forEach(function (x) {
+        h2 += '<tr><td>' + tx(x.fecha) + '</td>' +
+          '<td>' + tx(x.tipo) + '</td>' +
+          '<td class="obra">' + tx(x.quien) + '</td>' +
+          '<td>' + tx(x.unidad) + '</td>' +
+          '<td class="num">' + (x.monto === null || x.monto === undefined ? NE : soles(x.monto)) +
+          '</td></tr>';
+      });
+      if (g.length < s.filas) {
+        h2 += '<tr class="total"><td class="obra" colspan="5">TOTAL · ' + ent(s.filas) +
+          ' pagos · se muestran los ' + ent(g.length) + ' mayores</td></tr>';
+      }
+      return h2 + '</tbody></table></div>';
+    }
+    return null;
+  }
+};
+
+var _ecFiltro = {mes: "", cuenta: "", tipo: ""};
+
+function seccionEntreCuentas(){
+  var E = D.entre_cuentas || {};
+  if (!E.hay || !(E.detalle || []).length) return "";
+  var T = E.total || {}, S = E.saldos || {}, TR = E.transferencias || {};
+
+  var h = cabSeccion("Entre cuentas del grupo",
+    ent(T.filas) + " movimientos de " + esc(E.anio) + " · dinero que cambió de " +
+    "cuenta dentro de Habitat · no suma en ningún indicador de esta hoja",
+    "entrecuentas");
+
+  h += '<div class="rejilla-4">' +
+    '<div class="tarjeta"><span class="k">Se movió entre cuentas</span>' +
+      '<div class="v">' + soles(T.monto) + '</div>' +
+      '<div class="n">' + ent(T.filas) + ' movimientos que AXION rotula como ' +
+      '«Presup. Administrativo» u «Operativo», y no son un presupuesto</div></div>' +
+    '<div class="tarjeta"><span class="k">Transferencias</span>' +
+      '<div class="v">' + soles(TR.monto) + '</div>' +
+      '<div class="n">' + ent(TR.filas) + ' retiros de una cuenta del grupo a ' +
+      'otra · «Retiro de Habitat Bienes Raices EIRL»</div></div>' +
+    '<div class="tarjeta"><span class="k">Saldos de apertura</span>' +
+      '<div class="v">' + soles(S.monto) + '</div>' +
+      '<div class="n">' + ent(S.filas) + ' filas que dicen «SALDO – …»: es lo que ' +
+      'YA había en la cuenta, no dinero que entró. Van aparte por eso</div></div>' +
+    '<div class="tarjeta"><span class="k">Sin banco declarado</span>' +
+      '<div class="v">' + ent((E.sin_cuenta || {}).filas) + '</div>' +
+      '<div class="n">de ' + ent(T.filas) + ' · el campo «cuenta» empezó a ' +
+      'cargarse en agosto, antes viene vacío</div></div>' +
+    '</div>';
+
+  if ((E.sospechosas || []).length) {
+    var s0 = E.sospechosas[0];
+    h += '<div class="hallazgo" style="margin-top:var(--e4)">' +
+      '<span class="q">Una de estas filas menciona una unidad</span>' +
+      '<b>' + soles(s0.monto) + '</b> del ' + esc(s0.fecha) + ' · «' +
+      esc(s0.concepto) + '». Es la única de las ' + ent(T.filas) + ' que nombra ' +
+      'un departamento. <b>Si eso fue un cobro de cliente cargado como ' +
+      'presupuesto, hoy está fuera de toda cifra de cobranza del tablero.</b> ' +
+      'No se mueve —es carga de Habitat— pero hay que confirmarlo.' +
+      '<span class="quien">Administración · confirmar si fue un cobro</span></div>';
+  }
+
+  h += '<div class="tarjeta" style="margin-top:var(--e4);padding:var(--e4) var(--e2)">' +
+    '<div class="filtros-det" id="ec-filtros">' +
+      '<div class="fd"><span>Mes</span><select id="ec-mes">' +
+        '<option value="">Todos los meses</option>' +
+        (E.por_mes || []).map(function(m){
+          return '<option value="' + m.mes + '">' + esc(m.etiqueta) + ' · ' +
+            ent(m.filas) + ' · ' + soles(m.monto) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="fd"><span>Banco / razón social</span>' +
+      '<select id="ec-cuenta"><option value="">Todas</option>' +
+        (E.cuentas || []).map(function(c){
+          return '<option value="' + esc(c.cuenta) + '">' + esc(c.cuenta) + ' · ' +
+            soles(c.monto) + '</option>'; }).join('') +
+        ((E.sin_cuenta || {}).filas ? '<option value="__sin__">Sin banco declarado · ' +
+          ent(E.sin_cuenta.filas) + '</option>' : '') +
+      '</select></div>' +
+      '<div class="fd"><span>Tipo</span><select id="ec-tipo">' +
+        '<option value="">Los dos</option>' +
+        '<option value="transferencia">Solo transferencias</option>' +
+        '<option value="saldo de apertura">Solo saldos de apertura</option>' +
+      '</select></div>' +
+      '<div class="fd"><span>Buscar</span>' +
+      '<input id="ec-buscar" type="search" placeholder="concepto, banco…"></div>' +
+      '<button class="fd-limpiar" id="ec-limpiar">Limpiar</button>' +
+    '</div>' +
+    '<div id="ec-tabla"></div></div>';
+
+  return h + '</section>';
+}
+
+function pintarEntreCuentas(){
+  var cont = document.getElementById("ec-tabla");
+  if (!cont) return;
+  var E = D.entre_cuentas || {};
+  var f = _ecFiltro;
+  var filas = (E.detalle || []).filter(function(x){
+    if (f.mes && String(x.mes) !== String(f.mes)) return false;
+    if (f.cuenta === "__sin__" && x.cuenta) return false;
+    if (f.cuenta && f.cuenta !== "__sin__" && x.cuenta !== f.cuenta) return false;
+    if (f.tipo && x.tipo !== f.tipo) return false;
+    if (f.q) {
+      var t = (x.concepto + " " + x.cuenta + " " + x.obra + " " + x.rotulo).toLowerCase();
+      if (t.indexOf(f.q) < 0) return false;
+    }
+    return true;
+  });
+  var suma = filas.reduce(function(a, x){ return a + (x.monto || 0); }, 0);
+  var h = '<div class="resumen-det"><span>' + ent(filas.length) + ' de ' +
+    ent((E.detalle || []).length) + ' movimientos</span>' +
+    '<span class="suma">Suman · <b>' + soles(suma) + '</b></span></div>';
+  if (!filas.length) return void (cont.innerHTML = h +
+    '<p style="color:var(--texto-suave)">Ninguno con esos filtros.</p>');
+  h += '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+    '<th>Fecha</th><th>Concepto</th><th>Banco / razón social</th>' +
+    '<th>Rótulo en AXION</th><th>Tipo</th><th class="num">Monto</th>' +
+    '</tr></thead><tbody>';
+  filas.forEach(function(x){
+    h += '<tr><td>' + esc(x.fecha) + '</td>' +
+      '<td class="obra">' + esc(x.concepto) + '</td>' +
+      '<td>' + (x.cuenta ? esc(x.cuenta) : '<span class="raya">sin declarar</span>') + '</td>' +
+      '<td>' + esc(x.rotulo) + '</td>' +
+      '<td>' + (x.tipo === "saldo de apertura"
+        ? '<span class="marca">saldo de apertura</span>' : esc(x.tipo)) + '</td>' +
+      '<td class="num">' + soles(x.monto) + '</td></tr>';
+  });
+  h += '<tr class="total"><td colspan="5">TOTAL DE LO FILTRADO</td>' +
+    '<td class="num">' + soles(suma) + '</td></tr></tbody></table></div>';
+  cont.innerHTML = h;
+}
+
+function seccionControles(){
+  var h = cabSeccion("El programa se controla solo",
+    "los controles corren dentro del servidor, sin que nadie los invoque · " +
+    "el veredicto queda aca, donde lo ve cualquiera que opere el tablero",
+    "controles-auto");
+  h += '<div class="tarjeta" id="ctl-caja">' +
+    '<div style="display:flex;align-items:center;gap:var(--e3);flex-wrap:wrap">' +
+      '<span id="ctl-veredicto" class="chip" style="font-size:var(--t-h3);' +
+        'padding:6px 18px">consultando…</span>' +
+      '<span id="ctl-cuando" class="mas" style="margin:0"></span>' +
+      '<button id="ctl-boton" class="fd-limpiar" style="margin-left:auto" ' +
+        'type="button">Correr los controles ahora</button>' +
+    '</div>' +
+    '<div id="ctl-detalle" style="margin-top:var(--e2)"></div>' +
+    '</div>';
+  return h + '</section>';
+}
+
+function engancharControles(){
+  var ver = document.getElementById("ctl-veredicto");
+  if (!ver) return;
+  var cuando = document.getElementById("ctl-cuando");
+  var det = document.getElementById("ctl-detalle");
+  var boton = document.getElementById("ctl-boton");
+  var reloj = null;
+
+  function pintar(e){
+    if (e.corriendo){
+      ver.textContent = "CORRIENDO" + (e.va_min ? " · va " + e.va_min + " min" : "");
+      ver.className = "chip e-parcial";
+    } else if (e.veredicto === "VERDE"){
+      ver.textContent = "VERDE";
+      ver.className = "chip e-completo";
+    } else if (e.veredicto === "VERDE PARCIAL"){
+      ver.textContent = "VERDE PARCIAL";
+      ver.className = "chip e-parcial";
+    } else if (e.veredicto === "ROJO"){
+      ver.textContent = "ROJO";
+      ver.className = "chip";
+      ver.style.background = "#fbdcdc";
+      ver.style.color = "#8a1010";
+    } else {
+      ver.textContent = "todavía no corrió en este servidor";
+      ver.className = "chip e-sinfuente";
+    }
+    cuando.textContent = (e.cuando ? "última corrida: " + e.cuando +
+      (e.duracion_min ? " · tardó " + e.duracion_min + " min" : "") : "") +
+      (e.cada_horas ? " · corre solo cada " + e.cada_horas + " h" : "");
+    det.innerHTML = (e.detalle && e.detalle.length)
+      ? '<div class="hallazgo"><span class="q">Lo que encontró</span>' +
+        e.detalle.map(function(x){ return esc(x); }).join("<br>") + '</div>'
+      : "";
+    if (!e.corriendo && reloj){ clearInterval(reloj); reloj = null; }
+  }
+
+  function pedir(){
+    fetch("/controles/estado", {cache: "no-store"})
+      .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(pintar)
+      .catch(function(){
+        ver.textContent = "SIN CONTROLES";
+        ver.className = "chip e-sinfuente";
+        cuando.textContent = "este servidor no expone /controles/estado · hay que reiniciarlo";
+        if (reloj){ clearInterval(reloj); reloj = null; }
+      });
+  }
+
+  pedir();
+  boton.addEventListener("click", function(){
+    fetch("/controles/correr", {method: "POST"})
+      .then(pedir)
+      .catch(pedir);
+    if (!reloj) reloj = setInterval(pedir, 30000);
+  });
+}
+
+function engancharEntreCuentas(){
+  var m = document.getElementById("ec-mes");
+  if (!m) return;
+  function set(k, v){ _ecFiltro[k] = v; pintarEntreCuentas(); }
+  m.addEventListener("change", function(){ set("mes", this.value); });
+  var c = document.getElementById("ec-cuenta");
+  if (c) c.addEventListener("change", function(){ set("cuenta", this.value); });
+  var ti = document.getElementById("ec-tipo");
+  if (ti) ti.addEventListener("change", function(){ set("tipo", this.value); });
+  var b = document.getElementById("ec-buscar");
+  if (b) b.addEventListener("input", function(){
+    set("q", this.value.trim().toLowerCase()); });
+  var l = document.getElementById("ec-limpiar");
+  if (l) l.addEventListener("click", function(){
+    _ecFiltro = {mes: "", cuenta: "", tipo: "", q: ""};
+    if (m) m.value = ""; if (c) c.value = ""; if (ti) ti.value = "";
+    if (b) b.value = "";
+    pintarEntreCuentas();
+  });
+  pintarEntreCuentas();
+}
+</script>
+<script src="cockpit.js"></script>
+</body>
+</html>

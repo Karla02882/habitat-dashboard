@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caja · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+  <header class="cabecera"><div class="cabecera-fila">
+    <span class="hoja-nombre" id="hoja-nombre"></span>
+    <span class="cabecera-der" id="cab-der"></span></div></header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+  <div class="filtros-zona"><div class="filtros">
+    <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+    <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+    <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+    <button class="btn-act" id="btn-act">Actualizar ahora</button>
+  </div></div>
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+</div>
+
+<script>
+window.HOJA = {
+  id: "caja",
+  nombre: "Caja",
+  pregunta: "¿Alcanza el dinero?",
+  fuentes: ["AXION"],
+
+  filtros: ["banco"],
+  ventanas: {
+    "k-30d": "la proyección es del grupo entero: no sigue a ningún filtro",
+    "k-colchon": "el colchón usa el saldo del MES EN CURSO: el período y el proyecto no lo mueven"
+  },
+
+  _rsCuenta: function (c) {
+    c = String(c || "").toUpperCase();
+    if (c.indexOf("CONSTRUCTORA VELASCO") >= 0)
+      return "CONSTRUCTORA VELASCO LEON SOCIEDAD ANONIMA CERRADA";
+    if (c.indexOf("CORPORACION HABITAT") >= 0)
+      return "CORPORACION HABITAT SOCIEDAD ANONIMA CERRADA";
+    if (c.indexOf("BIENES RAICES") >= 0)
+      return "HABITAT BIENES RAICES EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA";
+    if (c.indexOf("ESCALAR") >= 0)
+      return "ESCALAR Y HABITAT GRUPO INMOBILIARIO S.A.C.";
+    if (c.indexOf("YEAN") >= 0) return "YEAN WILLIAM VELASCO LEON";
+    return "";
+  },
+  _entraRSCuenta: function (c) { return !RS || this._rsCuenta(c) === RS; },
+  _rsNombre: function (c) {
+    c = String(c || "").toUpperCase();
+    if (c.indexOf("CONSTRUCTORA VELASCO") >= 0) return "CONSTRUCTORA VELASCO LEON S.A.C.";
+    if (c.indexOf("CORPORACION HABITAT") >= 0) return "CORPORACION HABITAT S.A.C.";
+    if (c.indexOf("BIENES RAICES") >= 0) return "HABITAT BIENES RAICES E.I.R.L.";
+    if (c.indexOf("ESCALAR") >= 0) return "ESCALAR Y HABITAT GRUPO INMOBILIARIO S.A.C.";
+    if (c.indexOf("HABITAT LE") >= 0) return "HABITAT LEÓN S.A.C.";
+    if (c.indexOf("YEAN") >= 0) return "YEAN WILLIAM VELASCO LEON";
+    return "";
+  },
+
+  pintar: function (M, D) {
+    var self = this;
+    var pp = perPartes();
+    var fl = D.flujo || {};
+    var anioCaja = Number(fl.anio || 0);
+    var MESL = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"];
+    var vivos = (fl.meses || []).filter(function (m) {
+      return (m.pasado || m.en_curso) &&
+             ((m.entro || 0) > 0 || (m.salio || 0) > 0); });
+    var mesTope = 0;
+    vivos.forEach(function (m) { mesTope = Math.max(mesTope, m.mes); });
+
+    var mesSel = (!pp.hist && pp.mes && pp.anio === anioCaja) ? pp.mes : mesTope;
+    var prefMes = String(anioCaja) + "-" + (mesSel < 10 ? "0" : "") + mesSel;
+    var prefP = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+
+    var Fb = ((D.libro || {}).filas) || {};
+    var noms = Fb.cuenta || [], obrasLib = Fb.obra || [];
+    var entroDe = function (pref) {
+      var s = 0;
+      (Fb.f || []).forEach(function (r) {
+        if (pref && String(r[0] || "").indexOf(pref) !== 0) return;
+        if (r[7] !== "venta") return;
+        var cu = noms[r[6]];
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        if (OBRA) {
+          var ob = (r[5] !== null && r[5] !== undefined) ? obrasLib[r[5]] : "";
+          if (ob !== OBRA) return;
+        }
+        s += r[4] || 0;
+      });
+      return s;
+    };
+    var salioDe = function (pref) {
+      var s = 0;
+      (Fb.f || []).forEach(function (r) {
+        if (pref && String(r[0] || "").indexOf(pref) !== 0) return;
+        if (r[7] !== "gasto") return;
+        var cu = noms[r[6]];
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        if (OBRA) {
+          var ob = (r[5] !== null && r[5] !== undefined) ? obrasLib[r[5]] : "";
+          if (ob !== OBRA) return;
+        }
+        s += r[4] || 0;
+      });
+      return s;
+    };
+
+    var prefAct = String(anioCaja) + "-" + (mesTope < 10 ? "0" : "") + mesTope;
+    var apInt = {}, mvMes = {}, mesTopeL = "", fechaTope = "";
+    (Fb.f || []).forEach(function (r) {
+      var f = String(r[0] || "");
+      if (f.slice(0, 4) !== String(anioCaja)) return;
+      var m = f.slice(0, 7);
+      if (m > mesTopeL) mesTopeL = m;
+      if (f > fechaTope) fechaTope = f;
+      var cu = String(noms[r[6]] || "");
+      if (!cu) return;
+      var con = String(r[3] || "").replace(/^\s+/, "").toUpperCase();
+      if (r[7] === "presupuesto" && con.indexOf("SALDO") === 0) {
+        (apInt[cu] = apInt[cu] || {})[m] = (apInt[cu][m] || 0) + (r[4] || 0);
+        return;
+      }
+      var o = (mvMes[cu] = mvMes[cu] || {})[m] =
+        mvMes[cu][m] || {e: 0, s: 0, tr: 0, n: 0};
+      o.n++;
+      if (r[7] === "venta") o.e += r[4] || 0;
+      else if (r[7] === "gasto") o.s += r[4] || 0;
+      else if (r[7] === "presupuesto") o.tr += r[4] || 0;
+    });
+    var ext = (D.saldos_externos || {});
+    var EXA = ext.aperturas ||
+      (ext.fecha ? (function () { var o = {}; o[ext.fecha] = {cuentas: ext.cuentas || {}}; return o; })() : {});
+    var extVal = {}, extFue = {}, corteM = "";
+    Object.keys(EXA).forEach(function (f) {
+      var m = f.slice(0, 7);
+      if (m > mesTopeL) return;
+      var cs = (EXA[f] || {}).cuentas || {};
+      var fu = (EXA[f] || {}).fuente || {};
+      if (Object.keys(cs).length && m > corteM) corteM = m;
+      Object.keys(cs).forEach(function (cu) {
+        (extVal[cu] = extVal[cu] || {})[m] = cs[cu];
+        (extFue[cu] = extFue[cu] || {})[m] = fu[cu] || "contadora";
+      });
+    });
+    var hayContadora = !!corteM;
+    var mesDato = String(D.generado || "").slice(0, 7);
+    corteM = (mesDato.slice(0, 4) === String(anioCaja) && mesDato > mesTopeL)
+      ? mesDato : mesTopeL;
+    var corteN = corteM ? parseInt(corteM.slice(5, 7), 10) : 0;
+    var cierreN = corteN > 1 ? corteN - 1 : 12;
+    var sinCta = {n: 0, e: 0, s: 0, tr: 0};
+    (Fb.f || []).forEach(function (r) {
+      if (String(r[0] || "").slice(0, 4) !== String(anioCaja)) return;
+      if (String(noms[r[6]] || "")) return;
+      sinCta.n++;
+      if (r[7] === "venta") sinCta.e += r[4] || 0;
+      else if (r[7] === "gasto") sinCta.s += r[4] || 0;
+      else if (r[7] === "presupuesto") sinCta.tr += r[4] || 0;
+    });
+
+    var apAX = D.saldos_iniciales || {};
+    /* Lo que publica el motor, por cuenta (ver el mismo bloque en Resumen). */
+    var CCm = {};
+    (((D.control_cuentas || {}).cuentas) || []).forEach(function (c) {
+      var porMes = {}, orden = [];
+      (c.meses || []).forEach(function (f) { porMes[f.m] = f; orden.push(f.m); });
+      if (orden.length) CCm[c.cu] = {ap: c.ap, porMes: porMes, orden: orden};
+    });
+    var saldos = [], tengo = 0, tengoCierre = 0, positivos = 0, negN = 0, negS = 0,
+        trTot = 0, sinApert = 0, extUsadas = 0, alertas = [];
+    var universo = {};
+    Object.keys(apInt).forEach(function (cu) { universo[cu] = 1; });
+    Object.keys(mvMes).forEach(function (cu) { universo[cu] = 1; });
+    Object.keys(extVal).forEach(function (cu) { universo[cu] = 1; });
+    Object.keys(apAX).forEach(function (cu) { universo[cu] = 1; });
+    Object.keys(CCm).forEach(function (cu) { universo[cu] = 1; });
+    Object.keys(universo).forEach(function (cu) {
+      if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+      var extC = (extVal[cu] || {})[corteM];
+      var intC = (apInt[cu] || {})[corteM];
+      var cierre = null, fuente = "", nota = "",
+          hayAlgunaInt = Object.keys(apInt[cu] || {}).length > 0;
+      var apAXm = apAX[cu] || {};
+      var apAXk = Object.keys(apAXm).sort()[0];
+      if (apAXk && apAXk <= corteM) {
+        cierre = apAXm[apAXk];
+        Object.keys(mvMes[cu] || {}).forEach(function (m) {
+          if (m < apAXk || m >= corteM) return;
+          var o = mvMes[cu][m]; cierre += o.tr + o.e - o.s;
+        });
+        cierre = Math.round(cierre * 100) / 100;
+        fuente = "axion-inicial";
+        if (intC !== undefined)
+          nota = "cargado dos veces: " + soles(intC) + " · Administración";
+      }
+      else if (extC !== undefined) {
+        cierre = extC; fuente = extFue[cu][corteM]; extUsadas++;
+        if (intC !== undefined && Math.abs(intC - extC) > 0.01) {
+          alertas.push({tipo: "axion-vs-contadora", cuenta: cu, axion: intC, contadora: extC, dif: intC - extC});
+          nota = "AXION abrió con " + soles(intC);
+        }
+        if (fuente === "axion" && !hayAlgunaInt) {
+          alertas.push({tipo: "sin-apertura-axion", cuenta: cu, monto: extC});
+          nota = "sin apertura en AXION";
+        }
+      } else if (intC !== undefined) {
+        cierre = intC; fuente = "registro";
+        if (hayContadora) {
+          alertas.push({tipo: "fuera-de-lista", cuenta: cu, monto: intC});
+          nota = "fuera de la lista de la contadora";
+        }
+      } else {
+        var base = "";
+        Object.keys(apInt[cu] || {}).concat(Object.keys(extVal[cu] || {})).forEach(function (m) {
+          if (m < corteM && m > base) base = m; });
+        if (base) {
+          cierre = (extVal[cu] || {})[base] !== undefined ? extVal[cu][base] : apInt[cu][base];
+          Object.keys(mvMes[cu] || {}).forEach(function (m) {
+            if (m < base || m >= corteM) return;
+            var o = mvMes[cu][m]; cierre += o.tr + o.e - o.s;
+          });
+          fuente = "calculado";
+          if (hayContadora) {
+            alertas.push({tipo: "fuera-de-lista", cuenta: cu, monto: cierre});
+            nota = "fuera de la lista de la contadora";
+          }
+        } else {
+          fuente = "sin-apertura";
+        }
+      }
+      var e = 0, s2 = 0, tr = 0, nMov = 0;
+      Object.keys(mvMes[cu] || {}).forEach(function (m) {
+        if (m < corteM || m > mesTopeL) return;
+        var o = mvMes[cu][m]; e += o.e; s2 += o.s; tr += o.tr; nMov += o.n;
+      });
+      var mesCerrado = String(anioCaja) + "-" + (cierreN < 10 ? "0" : "") + cierreN;
+      var oc = (mvMes[cu] || {})[mesCerrado] || {e: 0, s: 0, tr: 0, n: 0};
+      var s = (cierre || 0) + tr + e - s2;
+      var ccu = CCm[cu];
+      if (ccu) {
+        var mTope = ccu.orden[ccu.orden.length - 1];
+        var mCierre = corteN - 1;
+        var fCierre = ccu.porMes[mCierre];
+        cierre = ccu.ap === null || ccu.ap === undefined ? null
+               : (mCierre >= 1 && fCierre ? fCierre.ax : ccu.ap);
+        fuente = cierre === null ? "sin-apertura" : "axion-inicial";
+        e = 0; s2 = 0; tr = 0; nMov = 0; nota = "";
+        ccu.orden.forEach(function (n) {
+          if (n < corteN) return;
+          var f = ccu.porMes[n]; e += f.v; tr += f.tr; s2 += f.s; nMov += f.n;
+          if (f.dup) nota = "cargado dos veces: " + soles(f.dup) + " · Administración";
+        });
+        var fc = ccu.porMes[cierreN];
+        oc = fc ? {e: fc.v, s: fc.s, tr: fc.tr, n: fc.n} : {e: 0, s: 0, tr: 0, n: 0};
+        s = ccu.porMes[mTope].ax;
+        if (cu === "SIN BANCO") nota = "movimientos sin banco asignado · Administración";
+      }
+      if (cierre === null) sinApert++;
+      saldos.push({cuenta: cu, apert: cierre, cierre: cierre, fuente: fuente,
+                   ext: extC !== undefined, dentro: oc, nota: nota,
+                   tr: tr, e: e, s: s2, nMov: nMov, saldo: s});
+      tengo += s; tengoCierre += (cierre || 0); trTot += tr;
+      if (s > 0) positivos += s; else if (s < 0) { negN++; negS += s; }
+    });
+    /* La cifra de la contadora contra lo cargado en AXION en el mes cerrado */
+    var brechas = [];
+    Object.keys(extVal).forEach(function (cu) {
+      if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+      var extC = extVal[cu][corteM];
+      if (extC === undefined) return;
+      var prev = "";
+      Object.keys(apInt[cu] || {}).concat(Object.keys(extVal[cu] || {})).forEach(function (m) {
+        if (m < corteM && m > prev) prev = m; });
+      if (!prev) return;
+      var est = (extVal[cu] || {})[prev] !== undefined ? extVal[cu][prev] : apInt[cu][prev];
+      Object.keys(mvMes[cu] || {}).forEach(function (m) {
+        if (m < prev || m >= corteM) return;
+        var o = mvMes[cu][m]; est += o.tr + o.e - o.s;
+      });
+      var br = extC - est;
+      if (Math.abs(br) < 0.01) return;
+      brechas.push({cuenta: cu, fuente: extFue[cu][corteM], desde: prev, hasta: corteM,
+                    est: est, contadora: extC, br: br});
+    });
+    if (Object.keys(CCm).length) {
+      brechas = [];
+      Object.keys(CCm).forEach(function (cu) {
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        var f = CCm[cu].porMes[cierreN];
+        if (!f || f.bco === undefined || Math.abs(f.bco - f.ax) < 0.01) return;
+        brechas.push({cuenta: cu, fuente: "banco", desde: "", hasta: corteM,
+                      est: f.ax, contadora: f.bco, br: f.bco - f.ax});
+      });
+    }
+    brechas.sort(function (a, b) { return Math.abs(b.br) - Math.abs(a.br); });
+    var ocPendL = (D.ordenes_compra || []).filter(function (o) {
+      return String(o.estado || "").toLowerCase() === "pendiente"; });
+    var ocPend = ocPendL.reduce(function (a, o) { return a + (o.total || 0); }, 0);
+    var dispongo = positivos - ocPend;
+    saldos.sort(function (a, b) { return ordenCuenta(a.cuenta, b.cuenta); });
+    var cmacSin = sinApert;
+
+    var mesHoy = 0;
+    Object.keys(CCm).forEach(function (cu) {
+      var o = CCm[cu].orden;
+      if (o.length) mesHoy = Math.max(mesHoy, o[o.length - 1]);
+    });
+    if (!mesHoy) mesHoy = mesTope;
+    var esMesCaja = !pp.hist && pp.anio === anioCaja && !!pp.mes;
+    var esAnioCaja = !pp.hist && pp.anio === anioCaja && !pp.mes;
+    var vDesde = esMesCaja ? pp.mes : (esAnioCaja ? 1 : mesHoy);
+    var vHasta = esMesCaja ? pp.mes : mesHoy;
+    var vista = [];
+    Object.keys(CCm).forEach(function (cu) {
+      if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+      var c = CCm[cu], fF = c.porMes[vHasta];
+      if (!fF) return;
+      var sinAp = c.ap === null || c.ap === undefined;
+      var fI = c.porMes[vDesde - 1];
+      var ini = sinAp ? null : (vDesde === 1 ? c.ap : (fI ? fI.ax : null));
+      var tr = 0, e = 0, s = 0, dup = 0;
+      for (var n = vDesde; n <= vHasta; n++) {
+        var f = c.porMes[n];
+        if (!f) continue;
+        tr += f.tr || 0; e += f.v || 0; s += f.s || 0; dup += f.dup || 0;
+      }
+      /* una cuenta sin saldo y sin movimiento en el período no dice nada */
+      if (Math.abs(ini || 0) < 0.005 && !tr && !e && !s && Math.abs(fF.ax) < 0.005) return;
+      var nota = [];
+      if (sinAp) nota.push("sin saldo inicial en AXION · Administración");
+      if (dup) nota.push("cargado dos veces: " + soles(dup) + " · Administración");
+      if (cu === "SIN BANCO") nota.push("movimientos sin banco asignado · Administración");
+      vista.push({cuenta: cu, ini: ini, tr: tr, e: e, s: s, fin: fF.ax, nota: nota.join(" · ")});
+    });
+    vista.sort(function (a, b) { return ordenCuenta(a.cuenta, b.cuenta); });
+    var rotVista = esAnioCaja ? String(anioCaja) : (MESL[vDesde] + " " + anioCaja);
+    var rotIni = vDesde === 1 ? "Saldo inicial " + anioCaja : "Cierre " + MESL[vDesde - 1];
+    var rotFin = vHasta === mesHoy ? "Hoy" : "Cierre " + MESL[vHasta];
+    var rotMov = esAnioCaja ? String(anioCaja) : MESL[vDesde];
+
+    var conSaldo = (esMesCaja || esAnioCaja) && !OBRA;
+    var filasCuadro = vista;
+    var rotCuadro = rotVista;
+    if (!conSaldo) {
+      var movP = {};
+      (Fb.f || []).forEach(function (r) {
+        if (prefP && String(r[0] || "").indexOf(prefP) !== 0) return;
+        var cu = String(noms[r[6]] || "") || "SIN BANCO";
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        if (OBRA) {
+          var ob = (r[5] !== null && r[5] !== undefined) ? obrasLib[r[5]] : "";
+          if (ob !== OBRA) return;
+        }
+        var con = String(r[3] || "").replace(/^\s+/, "").toUpperCase();
+        var x = movP[cu] = movP[cu] || {cuenta: cu, ini: null, fin: 0, tr: 0, e: 0, s: 0};
+        if (r[7] === "venta") x.e += r[4] || 0;
+        else if (r[7] === "gasto") x.s += r[4] || 0;
+        else if (r[7] === "presupuesto" && con.indexOf("SALDO") !== 0) x.tr += r[4] || 0;
+      });
+      filasCuadro = Object.keys(movP).map(function (k) { return movP[k]; })
+        .filter(function (x) { return x.tr || x.e || x.s; })
+        .sort(function (a, b) { return ordenCuenta(a.cuenta, b.cuenta); });
+      rotCuadro = pp.hist ? "Todos los años"
+        : (pp.mes ? MESL[pp.mes] + " " + pp.anio : String(pp.anio));
+    }
+    var agrupar = function (clave) {
+      var o = {}, orden = [];
+      filasCuadro.forEach(function (x) {
+        var k = clave(x.cuenta);
+        if (!o[k]) { o[k] = {k: k, ini: null, tr: 0, e: 0, s: 0, fin: 0}; orden.push(k); }
+        var g = o[k];
+        if (x.ini !== null) g.ini = (g.ini || 0) + x.ini;
+        g.tr += x.tr; g.e += x.e; g.s += x.s; g.fin += x.fin || 0;
+      });
+      return orden.map(function (k) { return o[k]; });
+    };
+    var porBanco = agrupar(function (cu) {
+      return cu.indexOf(" - ") > 0 ? cu.split(" - ")[0] : cu; });
+    var porRS = agrupar(function (cu) { return self._rsNombre(cu) || cu; });
+
+    var cobradoMes = entroDe(prefMes);
+    var salioMeses = [];
+    vivos.forEach(function (m) {
+      var pm = String(anioCaja) + "-" + (m.mes < 10 ? "0" : "") + m.mes;
+      salioMeses.push({mes: m.mes, s: salioDe(pm)});
+    });
+    var conGasto = salioMeses.filter(function (x) { return x.s > 0; });
+    var promGasto = conGasto.length ? conGasto.reduce(function (a, x) {
+      return a + x.s; }, 0) / conGasto.length : 0;
+    var eq = promGasto > 0 ? 100 * cobradoMes / promGasto : null;
+
+    var salioMesSinObra = function (pref) {
+      var s = 0;
+      (Fb.f || []).forEach(function (r) {
+        if (String(r[0] || "").indexOf(pref) !== 0) return;
+        if (r[7] !== "gasto") return;
+        var cu = noms[r[6]];
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        s += r[4] || 0;
+      });
+      return s;
+    };
+    var promCaja = 0, nCaja = 0, cajaMeses = [];
+    vivos.forEach(function (m) {
+      var pm = String(anioCaja) + "-" + (m.mes < 10 ? "0" : "") + m.mes;
+      var sm = salioMesSinObra(pm);
+      cajaMeses.push({mes: m.mes, s: sm});
+      if (sm > 0) { promCaja += sm; nCaja++; }
+    });
+    promCaja = nCaja ? promCaja / nCaja : 0;
+    var colchon = promCaja > 0 ? tengo / promCaja : null;
+    var saldoMes = {};
+    vivos.forEach(function (m) {
+      var sm = 0;
+      Object.keys(CCm).forEach(function (cu) {
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        var f = CCm[cu].porMes[m.mes];
+        if (f) sm += f.ax;
+      });
+      saldoMes[m.mes] = Math.round(sm * 100) / 100;
+    });
+
+
+    var hoyStr = String(D.publicado || D.generado || "").slice(0, 10);
+    var hoyD = new Date(hoyStr + "T12:00:00");
+    var porVencerL = [];
+    try {
+      porVencerL = ((D.areas_filas || {}).Cobranza || []).filter(function (x) {
+        return x.nombre === "Por vencer"; })[0].filas || [];
+    } catch (e) { porVencerL = []; }
+    var efUso = (((D.proyeccion || {}).efectividad) || {}).usada || 0;
+    var ritmoMes = vivos.length ? vivos.reduce(function (a, m) {
+      return a + (m.salio || 0); }, 0) / vivos.length : 0;
+    var rd = ritmoMes / 30;
+    var fstr = function (dias) {
+      var f = new Date(hoyD.getTime() + dias * 86400000);
+      var mm = f.getMonth() + 1;
+      return f.getFullYear() + "-" + (mm < 10 ? "0" : "") + mm + "-" +
+        (f.getDate() < 10 ? "0" : "") + f.getDate();
+    };
+    var venceEn = function (dias) {
+      var lim = fstr(dias), n = 0, s = 0;
+      porVencerL.forEach(function (r) {
+        if (r.fuera) return;
+        var f = String(r.fecha || "");
+        if (f > hoyStr && f <= lim) { n++; s += r.monto || 0; }
+      });
+      return {n: n, s: s};
+    };
+    var tengoGrupo = 0;
+    Object.keys(CCm).forEach(function (cu) {
+      var c = CCm[cu], ult = c.porMes[c.orden[c.orden.length - 1]];
+      if (ult) tengoGrupo += ult.ax;
+    });
+    if (!Object.keys(CCm).length) tengoGrupo = tengo;
+    var proy = {v: {}, cruce: null, saldo: {}};
+    var sim = tengoGrupo;
+    for (var t = 1; t <= 30; t++) {
+      var ft = fstr(t), cobT = 0;
+      porVencerL.forEach(function (r) {
+        if (!r.fuera && String(r.fecha || "") === ft) cobT += r.monto || 0; });
+      sim += cobT * efUso / 100 - rd;
+      if (sim < 0 && proy.cruce === null) proy.cruce = ft;
+      if (t === 7 || t === 15 || t === 30) proy.saldo[t] = sim;
+    }
+    [7, 15, 30].forEach(function (dd) { proy.v[dd] = venceEn(dd); });
+    var MABR = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago",
+                "Set", "Oct", "Nov", "Dic"];
+    var fCorta = function (iso) {
+      if (!iso) return "";
+      return parseInt(iso.slice(8, 10), 10) + " " + MABR[parseInt(iso.slice(5, 7), 10)];
+    };
+
+    var serieEntro = {}, serieSalio2 = {}, serieNeto = {}, serieSaldo = {};
+    vivos.forEach(function (m) {
+      var pm = String(anioCaja) + "-" + (m.mes < 10 ? "0" : "") + m.mes;
+      serieEntro[m.mes] = entroDe(pm);
+      serieSalio2[m.mes] = salioDe(pm);
+      serieNeto[m.mes] = serieEntro[m.mes] - serieSalio2[m.mes];
+      var s = 0;
+      (Fb.f || []).forEach(function (r) {
+        if (String(r[0] || "").indexOf(pm) !== 0) return;
+        var cu = noms[r[6]];
+        if (!entraBanco(cu) || !self._entraRSCuenta(cu)) return;
+        if (r[7] === "venta") s += r[4] || 0;
+        else if (r[7] === "gasto") s -= r[4] || 0;
+        else if (r[7] === "presupuesto") s += r[4] || 0;
+      });
+      serieSaldo[m.mes] = s;
+    });
+    var chispa = function (serie, conNeg) {
+      var meses = vivos.map(function (m) { return m.mes; });
+      if (!meses.length) return '';
+      var max = 1;
+      meses.forEach(function (m) { max = Math.max(max, Math.abs(serie[m] || 0)); });
+      var t = '<div class="d-chispa">';
+      meses.forEach(function (m) {
+        var v = serie[m] || 0;
+        var alto = Math.max(2, Math.round(30 * Math.abs(v) / max));
+        var cls = (m === mesTope ? 'act' : '') + (conNeg && v < 0 ? ' neg' : '');
+        t += '<i class="' + cls + '" style="height:' + alto + 'px" title="' +
+          esc(MABR[m]) + ' ' + soles(v) + '"></i>';
+      });
+      t += '</div><div class="d-chispa-pie"><span>' + esc(MABR[meses[0]]) +
+        '</span><span>' + esc(MABR[meses[meses.length - 1]]) + '</span></div>';
+      return t;
+    };
+
+    var h = '<div class="d-lienzo">';
+
+    var s30 = proy.saldo[30];
+    h += '<div class="d-kpis">' +
+      '<div class="d-carta d-abrible abrible" data-abre="k-tengo" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">◈</span><span class="d-preg">¿Cuánto dinero tenemos?</span></div>' +
+        '<div class="d-cifra"' + (tengo < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        solesM(tengo) + '</div>' +
+        '<div class="d-exacta">' + soles(tengo) + ' · ' + ent(saldos.length) +
+        ' cuentas</div>' +
+        '<div class="d-pie"><span class="d-tag">' +
+        (function () {
+          var fb = ((D.control_cuentas || {}).banco_al_dia || {}).fecha || "";
+          return 'según AXION' + (fb ? ' · banco al ' + Number(fb.slice(8, 10)) + ' de ' +
+            String(MESL[Number(fb.slice(5, 7))] || "").toLowerCase() : '');
+        })() +
+        '</span>disponible ' + soles(dispongo) +
+        (alertas.length + brechas.length
+          ? ' <span class="d-tag mal">' + ent(alertas.length + brechas.length) + ' alertas</span>' : '') +
+        '</div>' + chispa(serieSaldo, false) + '</div>' +
+      '<div class="d-carta d-abrible abrible" data-abre="k-30d" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">◔</span><span class="d-preg">¿Alcanza para 30 días?</span></div>' +
+        '<div class="d-cifra"' + (s30 < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        solesM(s30) + '</div>' +
+        '<div class="d-exacta">' + soles(s30) + ' · día 30</div>' +
+        '<div class="d-pie"><span class="d-tag ' + (proy.cruce ? 'mal' : 'ok') + '">' +
+        (proy.cruce ? 'cruza cero' : 'alcanza') + '</span>' +
+        (proy.cruce ? fCorta(proy.cruce) : '') + '</div>' +
+        chispa(serieNeto, true) + '</div>' +
+      '<div class="d-carta d-abrible abrible" data-abre="k-eq" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">◐</span><span class="d-preg">¿' +
+        esc(MESL[mesSel]) + ' se paga solo?</span></div>' +
+        '<div class="d-cifra"' + (eq !== null && eq < 100 ? ' style="color:var(--rojo)"' : '') + '>' +
+        (eq !== null ? fmt1(eq) + '%' : '—') + '</div>' +
+        '<div class="d-exacta">' + (eq !== null ?
+          soles(cobradoMes) + ' de ' + soles(promGasto) : '—') + '</div>' +
+        '<div class="d-pie">' + (eq !== null ?
+          '<span class="d-tag ' + (eq >= 100 ? 'ok' : 'mal') + '">' +
+          (eq >= 100 ? 'cubierto' : 'falta ' + solesM(promGasto - cobradoMes)) +
+          '</span>' : '') + '</div>' +
+        chispa(serieEntro, false) + '</div>' +
+      '<div class="d-carta d-abrible abrible" data-abre="k-colchon" aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">◒</span><span class="d-preg">¿Para cuántos meses alcanza?</span></div>' +
+        '<div class="d-cifra"' + (colchon !== null && colchon < 1 ? ' style="color:var(--rojo)"' : '') + '>' +
+        (colchon !== null ? fmt1(colchon) + ' meses' : '—') + '</div>' +
+        '<div class="d-exacta">' + (colchon !== null ?
+          solesM(tengo) + ' ÷ ' + solesM(promCaja) + '/mes' : '—') + '</div>' +
+        '<div class="d-pie">' + (colchon !== null ?
+          '<span class="d-tag ' + (colchon >= 1 ? 'ok' : 'mal') + '">' +
+          (colchon >= 1 ? 'cubre el mes' : 'no cubre el mes') + '</span>' : '') +
+        '</div>' + chispa(saldoMes, true) + '</div>' +
+      '</div>' +
+      '<div class="detalle" id="det-k-tengo"></div>' +
+      '<div class="detalle" id="det-k-30d"></div>' +
+      '<div class="detalle" id="det-k-eq"></div>' +
+      '<div class="detalle" id="det-k-colchon"></div>';
+
+    var NEc = "No existe";
+    var celdaC = function (v) {
+      return '<td class="num"' + (v < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+        soles(v) + '</td>';
+    };
+    var filaC = function (nombre, g, esTotal) {
+      return '<tr' + (esTotal ? ' class="total"' : '') + '><td class="obra">' + esc(nombre) + '</td>' +
+        (conSaldo ? (g.ini === null ? '<td class="num">' + NEc + '</td>' : celdaC(g.ini)) : '') +
+        '<td class="num">' + soles(g.e + g.tr) +
+        (g.tr ? '<span class="ob-sub">presupuesto ' + soles(g.tr) + '</span>' : '') + '</td>' +
+        '<td class="num">' + soles(g.s) + '</td>' +
+        (conSaldo ? celdaC(g.fin) : '') + '</tr>';
+    };
+    var cuadro = function (titulo, primera, grupos) {
+      var t = '<div class="d-carta"><h3 class="d-tit">' + esc(titulo) + '</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>' + esc(primera) + '</th>' +
+        (conSaldo ? '<th class="num">' + esc(rotIni) + '</th>' : '') +
+        '<th class="num">Ingresos</th><th class="num">Egresos</th>' +
+        (conSaldo ? '<th class="num">' + esc(rotFin) + '</th>' : '') +
+        '</tr></thead><tbody>';
+      if (!grupos.length) {
+        t += '<tr><td class="obra">' + NEc + '</td>' +
+          '<td class="num">' + NEc + '</td><td class="num">' + NEc + '</td>' +
+          (conSaldo ? '<td class="num">' + NEc + '</td><td class="num">' + NEc + '</td>' : '') +
+          '</tr>';
+      }
+      var T = {ini: null, tr: 0, e: 0, s: 0, fin: 0};
+      grupos.forEach(function (g) {
+        if (g.ini !== null) T.ini = (T.ini || 0) + g.ini;
+        T.tr += g.tr; T.e += g.e; T.s += g.s; T.fin += g.fin;
+        t += filaC(g.k, g, false);
+      });
+      if (grupos.length) t += filaC("TOTAL", T, true);
+      return t + '</tbody></table></div></div>';
+    };
+    h += cuadro("Por banco · " + rotCuadro, "Banco", porBanco) +
+      cuadro("Por razón social · " + rotCuadro, "Razón social", porRS);
+
+    h += '</div>';
+
+    this._saldos = saldos; this._tengo = tengo; this._dispongo = dispongo;
+    this._anioCaja = anioCaja; this._MESL = MESL; this._mesSel = mesSel;
+    this._mesTope = mesTope;
+    this._vista = vista; this._vDesde = vDesde; this._vHasta = vHasta;
+    this._mesHoy = mesHoy; this._rotVista = rotVista; this._rotIni = rotIni;
+    this._rotFin = rotFin; this._rotMov = rotMov;
+    this._serieEntro = serieEntro; this._saldoMes = saldoMes;
+    this._sinCta = sinCta; this._alertas = alertas; this._brechas = brechas;
+    this._tengoCierre = tengoCierre; this._corteN = corteN; this._cierreN = cierreN;
+    this._hayContadora = hayContadora; this._fechaTope = fechaTope;
+    this._Fb = Fb; this._noms = noms; this._prefAct = prefAct;
+    this._ocPend = ocPend; this._ocPendN = ocPendL.length;
+    this._positivos = positivos;
+    this._proy = proy; this._efUso = efUso; this._ritmoMes = ritmoMes;
+    this._hoyStr = hoyStr; this._fCorta = fCorta;
+    this._porVencerL = porVencerL; this._fstr = fstr;
+    this._cmacSin = cmacSin;
+    this._cobradoMes = cobradoMes; this._promGasto = promGasto;
+    this._eq = eq; this._salioMeses = salioMeses; this._nGasto = conGasto.length;
+    this._promCaja = promCaja; this._nCaja = nCaja; this._colchon = colchon;
+    this._cajaMeses = cajaMeses;
+    return h;
+  },
+
+  detalle: function (id, el) {
+    var self = this;
+    var t = '<button class="cerrar">Cerrar</button>';
+
+    if (id === "k-tengo") {
+      var NE = "No existe";
+      var rojo = function (v) { return v < 0 ? ' style="color:var(--rojo)"' : ''; };
+      var brDe = {};
+      (this._brechas || []).forEach(function (x) { brDe[x.cuenta] = x; });
+      var conBrecha = this._vDesde === this._corteN;
+      var celBrecha = function (cu) {
+        var b = brDe[cu];
+        if (!b || !conBrecha) return '';
+        return '<span class="ob-sub">' +
+          (b.fuente === "banco" ? 'Banco ≠ AXION en el cierre' : 'Cierre anotado ≠ movimientos de AXION') +
+          ' ' + (b.br >= 0 ? '+' : '') + soles(b.br) + ' · Administración</span>';
+      };
+      var esHoy = this._vHasta === this._mesHoy;
+      var h = t + '<h3>El dinero, cuenta por cuenta · ' + esc(this._rotVista) +
+        (esHoy && this._fechaTope ? ' · al ' + esc(this._fechaTope) : '') + '</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cuenta</th>' +
+        '<th class="num">' + esc(this._rotIni) + '</th>' +
+        '<th class="num">Ingresos ' + esc(this._rotMov) + '</th>' +
+        '<th class="num">Egresos ' + esc(this._rotMov) + '</th>' +
+        '<th class="num">' + esc(this._rotFin) + '</th></tr></thead><tbody>';
+      var T = {ini: 0, tr: 0, e: 0, s: 0, fin: 0};
+      if (!this._vista.length) {
+        h += '<tr><td class="obra">' + NE + '</td><td class="num">' + NE + '</td>' +
+          '<td class="num">' + NE + '</td><td class="num">' + NE + '</td>' +
+          '<td class="num">' + NE + '</td></tr>';
+      }
+      this._vista.forEach(function (x) {
+        T.ini += x.ini || 0; T.tr += x.tr; T.e += x.e; T.s += x.s; T.fin += x.fin;
+        h += '<tr><td class="obra">' + esc(x.cuenta) +
+          (x.nota ? '<span class="ob-sub"> ' + esc(x.nota) + '</span>' : '') +
+          celBrecha(x.cuenta) + '</td>' +
+          '<td class="num"' + rojo(x.ini || 0) + '>' + (x.ini !== null ? soles(x.ini) : NE) + '</td>' +
+          '<td class="num">' + soles(x.e + x.tr) +
+          (x.tr ? '<span class="ob-sub">presupuesto ' + soles(x.tr) + '</span>' : '') + '</td>' +
+          '<td class="num">' + soles(x.s) + '</td>' +
+          '<td class="num"' + rojo(x.fin) + '>' + soles(x.fin) + '</td></tr>';
+      });
+      if (this._vista.length) {
+        h += '<tr class="total"><td class="obra">TOTAL</td>' +
+          '<td class="num"' + rojo(T.ini) + '>' + soles(T.ini) + '</td>' +
+          '<td class="num">' + soles(T.e + T.tr) +
+          (T.tr ? '<span class="ob-sub">presupuesto ' + soles(T.tr) + '</span>' : '') + '</td>' +
+          '<td class="num">' + soles(T.s) + '</td>' +
+          '<td class="num"' + rojo(T.fin) + '>' + soles(T.fin) + '</td></tr>';
+      }
+      if (esHoy) {
+        h += '<tr class="total"><td class="obra">Compras pendientes de pago · ' +
+          ent(this._ocPendN) + ' órdenes</td>' +
+          '<td class="num"></td><td class="num"></td><td class="num"></td>' +
+          '<td class="num" style="color:var(--rojo)">− ' + soles(this._ocPend) + '</td></tr>' +
+          '<tr class="total"><td class="obra">Obligaciones por pagar en AXION · Administración</td>' +
+          '<td class="num"></td><td class="num"></td><td class="num"></td>' +
+          '<td class="num">' + NE + '</td></tr>';
+      }
+      return h + '</tbody></table></div>';
+    }
+
+    if (id === "k-30d") {
+      var self2 = this, p = this._proy, NE30 = "No existe";
+      var lim30 = this._fstr(30), prox = [];
+      this._porVencerL.forEach(function (r) {
+        if (r.fuera) return;
+        var f = String(r.fecha || "");
+        if (f > self2._hoyStr && f <= lim30) prox.push(r);
+      });
+      prox.sort(function (a, b) {
+        return String(a.fecha || "") < String(b.fecha || "") ? -1
+          : (String(a.fecha || "") > String(b.fecha || "") ? 1 : (b.monto || 0) - (a.monto || 0)); });
+      var h30 = t + '<h3>Proyección de caja · próximos 30 días</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Cuota por cobrar</th><th class="num">Vence</th>' +
+        '<th class="num">Esperado al ' + fmt1(this._efUso) + '%</th>' +
+        '<th class="num">Gasto al ritmo</th>' +
+        '<th class="num">Saldo proyectado</th></tr></thead><tbody>';
+      if (!prox.length) {
+        h30 += '<tr><td class="obra">' + NE30 + '</td><td class="num">' + NE30 + '</td>' +
+          '<td class="num"></td><td class="num"></td><td class="num"></td></tr>';
+      }
+      prox.forEach(function (r) {
+        var dd = r.d || [];
+        h30 += '<tr><td class="obra">' + esc(self2._fCorta(String(r.fecha))) + ' · ' +
+          esc(String(dd[0] || NE30) + ' · ' + String(r.obra || NE30)) + '</td>' +
+          '<td class="num">' + soles(r.monto || 0) + '</td>' +
+          '<td class="num"></td><td class="num"></td><td class="num"></td></tr>';
+      });
+      [7, 15, 30].forEach(function (dd) {
+        var v = p.v[dd], gasto = self2._ritmoMes / 30 * dd;
+        var sp = p.saldo[dd];
+        h30 += '<tr class="total"><td class="obra">' + ent(dd) + ' días · ' + ent(v.n) + ' cuotas</td>' +
+          '<td class="num">' + soles(v.s) + '</td>' +
+          '<td class="num">' + soles(v.s * self2._efUso / 100) + '</td>' +
+          '<td class="num">' + soles(gasto) + '</td>' +
+          '<td class="num"' + (sp < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
+          soles(sp) + '</td></tr>';
+      });
+      return h30 + '</tbody></table></div>';
+    }
+
+    if (id === "k-eq") {
+      var MESL2 = this._MESL, prom = this._promGasto, cob = this._serieEntro || {};
+      var h3 = t + '<h3>Cobrado y egresos, mes a mes</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Mes</th><th class="num">Cobrado</th><th class="num">Egresos</th>' +
+        '<th class="num">% del egreso promedio</th></tr></thead><tbody>';
+      this._salioMeses.forEach(function (x) {
+        var c = cob[x.mes] || 0;
+        h3 += '<tr><td class="obra">' + esc(MESL2[x.mes]) + '</td>' +
+          '<td class="num">' + soles(c) + '</td>' +
+          '<td class="num">' + soles(x.s) + '</td>' +
+          '<td class="num"' + (prom > 0 && c < prom ? ' style="color:var(--rojo)"' : '') + '>' +
+          (prom > 0 ? fmt1(100 * c / prom) + '%' : 'No existe') + '</td></tr>';
+      });
+      h3 += '<tr class="total"><td class="obra">PROMEDIO · ' + ent(this._nGasto) +
+        ' meses con egresos</td><td class="num"></td>' +
+        '<td class="num">' + soles(prom) + '</td><td class="num"></td></tr>';
+      h3 += '</tbody></table></div>';
+      return h3;
+    }
+
+    if (id === "k-colchon") {
+      var MESL4 = this._MESL, promC = this._promCaja, sm = this._saldoMes || {},
+          mHoy = this._mesTope;
+      var h4 = t + '<h3>Meses de colchón, mes a mes</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Mes</th><th class="num">Saldo al cierre</th><th class="num">Egresos</th>' +
+        '<th class="num">Meses de colchón</th></tr></thead><tbody>';
+      (this._cajaMeses || []).forEach(function (x) {
+        var sa = x.mes === mHoy ? self._tengo : (sm[x.mes] || 0);
+        h4 += '<tr><td class="obra">' + esc(MESL4[x.mes]) + (x.mes === mHoy ? ' · hoy' : '') + '</td>' +
+          '<td class="num"' + (sa < 0 ? ' style="color:var(--rojo)"' : '') + '>' + soles(sa) + '</td>' +
+          '<td class="num">' + soles(x.s) + '</td>' +
+          '<td class="num"' + (promC > 0 && sa / promC < 1 ? ' style="color:var(--rojo)"' : '') + '>' +
+          (promC > 0 ? fmt1(sa / promC) : 'No existe') + '</td></tr>';
+      });
+      h4 += '<tr class="total"><td class="obra">PROMEDIO · ' + ent(this._nCaja) +
+        ' meses con egresos</td><td class="num"></td>' +
+        '<td class="num">' + soles(promC) + '</td><td class="num"></td></tr>';
+      return h4 + '</tbody></table></div>';
+    }
+
+    return null;
+  },
+
+  conectar: function () {}
+};
+</script>
+</body>
+</html>

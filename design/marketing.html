@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marketing · Habitat Control</title>
+<link rel="stylesheet" href="cockpit.css?v=1786485196">
+</head>
+<body>
+<div class="envoltorio">
+
+  <header class="cabecera">
+    <div class="cabecera-fila">
+      <span class="hoja-nombre" id="hoja-nombre"></span>
+      <span class="cabecera-der" id="cab-der"></span>
+    </div>
+  </header>
+  <nav class="nav" id="nav"></nav>
+  <div class="subnav" id="subnav"></div>
+
+  <div class="filtros-zona">
+    <div class="filtros">
+      <div class="filtro"><label for="f-periodo">Período</label><select id="f-periodo"></select></div>
+      <div class="filtro" id="caja-rs"><label for="f-rs">Razón social</label><select id="f-rs"></select></div>
+      <div class="filtro" id="caja-obra"><label for="f-obra">Proyecto</label><select id="f-obra"></select></div>
+      <button class="btn-act" id="btn-act">Actualizar ahora</button>
+    </div>
+  </div>
+
+  <div class="fuentes" id="fuentes"></div>
+  <div id="cargando">leyendo <code>tablero_datos.json</code>…</div>
+  <div id="hoja" hidden></div>
+
+</div>
+
+<script>
+window.HOJA = {
+  id: "marketing",
+  nombre: "Marketing",
+  pregunta: "¿Cuánto se invirtió y de dónde vino la venta?",
+  fuentes: ["AXION"],
+
+  sinRazonObra: true,
+
+  ventanas: {},
+
+
+  _mesesDelAnio: function (D) {
+    var out = [];
+    for (var m = 1; m <= 12; m++) {
+      var k = String(m);
+      if ((D.meses || {})[k]) out.push([m, k]);
+    }
+    return out;
+  },
+
+  _esConsolidado: function (M, D, pp, anioCaja) {
+    if (pp && !pp.hist && pp.anio === anioCaja) return false;  // el año en curso
+    var base = ((D.meses || {})["None"] || {}).indicadores || [];
+    var mios = (M.indicadores || []);
+    var ref = {}, n = 0;
+    base.forEach(function (i) { if (i.area === "Marketing") { ref[i.indicador] = i.valor; n++; } });
+    if (!n) return false;
+    var iguales = 0, vistos = 0;
+    mios.forEach(function (i) {
+      if (i.area !== "Marketing") return;
+      vistos++;
+      if (ref.hasOwnProperty(i.indicador) && ref[i.indicador] === i.valor) iguales++;
+    });
+    return vistos > 0 && iguales === vistos;
+  },
+
+  _cobertura: function (D, nombre) {
+    var meses = [], self = this;
+    self._mesesDelAnio(D).forEach(function (par) {
+      ((D.meses[par[1]] || {}).indicadores || []).forEach(function (i) {
+        if (i.area === "Marketing" && i.indicador === nombre &&
+            i.valor !== null && i.valor !== undefined) meses.push(par[0]);
+      });
+    });
+    return {n: meses.length, total: self._mesesDelAnio(D).length,
+            ultimo: meses.length ? meses[meses.length - 1] : null, meses: meses};
+  },
+
+  _serie: function (D, nombre) {
+    var out = [], self = this;
+    var a = String((D.flujo || {}).anio || "");
+    self._mesesDelAnio(D).forEach(function (par) {
+      var v = null;
+      ((D.meses[par[1]] || {}).indicadores || []).forEach(function (i) {
+        if (i.area === "Marketing" && i.indicador === nombre) v = i.valor;
+      });
+      out.push({mes: par[0], valor: v,
+        clave: a + "-" + (par[0] < 10 ? "0" : "") + par[0]});
+    });
+    return out;
+  },
+
+  _comoSeArma: function (D, ind) {
+    var vals = [];
+    this._serie(D, ind.indicador).forEach(function (s) {
+      if (s.valor !== null && s.valor !== undefined) vals.push(s.valor);
+    });
+    if (!vals.length || ind.valor === null || ind.valor === undefined) return "";
+    var s = 0;
+    vals.forEach(function (v) { s += v; });
+    var v = ind.valor;
+    if (Math.abs(v - s) < 0.01) return "suma";
+    if (Math.abs(v - s / vals.length) < 0.01) return "promedio";
+    if (Math.abs(v - vals[vals.length - 1]) < 0.01) return "último mes";
+    return "";
+  },
+
+  _busca: function (todos, nombre) {
+    for (var i = 0; i < todos.length; i++)
+      if (todos[i].indicador === nombre) return todos[i];
+    return null;
+  },
+
+  /* Una cifra con la unidad que declara el propio indicador. */
+  _cifra: function (ind, v) {
+    if (v === null || v === undefined) return "—";
+    var u = ind ? ind.unidad : "";
+    return u === "S/." ? soles(v) : u === "%" ? pct(v) : ent(Math.round(v));
+  },
+
+  _pagos: function (D, prefP) {
+    var Fb = ((D.libro || {}).filas) || {};
+    var cats = Fb.cat || [], ctas = Fb.cuenta || [], obs = Fb.obra || [];
+    var MK = {"Marketing": 1, "Publicidad": 1};
+    var out = [];
+    (Fb.f || []).forEach(function (r) {
+      if (r[7] !== "gasto") return;
+      if (prefP && String(r[0] || "").indexOf(prefP) !== 0) return;
+      var cat = (r[2] !== null && r[2] !== undefined) ? cats[r[2]] : "";
+      if (!MK[cat]) return;
+      out.push({fecha: String(r[0] || ""), cat: cat,
+        concepto: String(r[3] || "—"), monto: r[4] || 0,
+        obra: (r[5] !== null && r[5] !== undefined) ? obs[r[5]] : "",
+        cuenta: (r[6] !== null && r[6] !== undefined) ? ctas[r[6]] : ""});
+    });
+    return out;
+  },
+
+  _sinRotulo: function (D, prefP) {
+    var Fb = ((D.libro || {}).filas) || {};
+    var cats = Fb.cat || [];
+    var s = 0, n = 0, tot = 0, nt = 0;
+    (Fb.f || []).forEach(function (r) {
+      if (r[7] !== "gasto") return;
+      if (prefP && String(r[0] || "").indexOf(prefP) !== 0) return;
+      var cat = (r[2] !== null && r[2] !== undefined) ? cats[r[2]] : "";
+      tot += r[4] || 0; nt++;
+      if (!cat) { s += r[4] || 0; n++; }
+    });
+    return {monto: s, filas: n, total: tot, filasTotal: nt,
+            pct: tot ? s / tot * 100 : 0};
+  },
+
+  _ventasP: function (D, pp) {
+    var bl = null;
+    (((D.areas_filas || {}).Comercial) || []).forEach(function (b) {
+      if (b && b.nombre === "Origen declarado de la venta") bl = b;
+    });
+    var pref = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+    var filas = ((bl || {}).filas || []).filter(function (r) {
+      return !pref || String(r.fecha || "").indexOf(pref) === 0;
+    });
+    var valor = function (x) {
+      x = String(x === null || x === undefined ? "" : x).trim();
+      return (!x || x.charAt(0) === "—") ? null : x;
+    };
+    var dia = function (s) {
+      var t = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ""));
+      return t ? Date.UTC(+t[1], +t[2] - 1, +t[3]) / 864e5 : null;
+    };
+    var can = {}, con = 0, monto = 0;
+    var ok = [], sinFecha = 0, imposibles = 0, hayLlegada = false;
+    filas.forEach(function (r) {
+      var c = valor(r.grupo), s = valor((r.d || [])[3]), m = r.monto || 0;
+      monto += m;
+      if (c) con++;
+      var k = c || "", o = can[k] = can[k] || {canal: c, n: 0, monto: 0, subs: {}};
+      o.n++; o.monto += m;
+      var ks = s || "", so = o.subs[ks] = o.subs[ks] || {sub: s, n: 0, monto: 0};
+      so.n++; so.monto += m;
+      if (r.llegada !== undefined) hayLlegada = true;
+      var dv = dia(r.fecha), dl = dia(r.llegada);
+      if (dl === null || dv === null) { sinFecha++; return; }
+      var dd = dv - dl;
+      if (dd < 0 || dd > 400) { imposibles++; return; }
+      ok.push(dd);
+    });
+    var canales = Object.keys(can).map(function (k) {
+      var o = can[k];
+      o.subs = Object.keys(o.subs).map(function (j) { return o.subs[j]; })
+        .sort(function (a, b) { return b.n - a.n || b.monto - a.monto; });
+      return o;
+    }).sort(function (a, b) {
+      if (!a.canal !== !b.canal) return a.canal ? -1 : 1;   // sin origen al final
+      return b.n - a.n || b.monto - a.monto;
+    });
+    ok.sort(function (a, b) { return a - b; });
+    var med = ok.length ? (ok.length % 2 ? ok[(ok.length - 1) / 2]
+      : (ok[ok.length / 2 - 1] + ok[ok.length / 2]) / 2) : null;
+    var suma = 0;
+    ok.forEach(function (x) { suma += x; });
+    var cuenta = function (f) { return ok.filter(f).length; };
+    return {
+      filas: filas, n: filas.length, con: con, monto: monto, canales: canales,
+      dias: {hay: hayLlegada, n: ok.length, mediana: med,
+        promedio: ok.length ? suma / ok.length : null,
+        max: ok.length ? ok[ok.length - 1] : null,
+        sinFecha: sinFecha, imposibles: imposibles,
+        tramos: [
+          {rot: "Mismo día", n: cuenta(function (x) { return x === 0; })},
+          {rot: "1 a 7 días", n: cuenta(function (x) { return x >= 1 && x <= 7; })},
+          {rot: "8 a 30 días", n: cuenta(function (x) { return x >= 8 && x <= 30; })},
+          {rot: "31 a 90 días", n: cuenta(function (x) { return x >= 31 && x <= 90; })},
+          {rot: "más de 90 días", n: cuenta(function (x) { return x > 90; })}
+        ]}
+    };
+  },
+
+
+  pintar: function (M, D) {
+    var self = this;
+    var pp = perPartes();
+    var anioCaja = Number((D.flujo || {}).anio || 0);
+    var esMes = !pp.hist && pp.mes && pp.anio === anioCaja;
+    var esAnio = !pp.hist && !pp.mes && pp.anio === anioCaja;
+    var prefP = pp.hist ? "" : (String(pp.anio || "") +
+      (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+
+    this._D = D;
+
+    var todos = (M.indicadores || D.indicadores || [])
+      .filter(function (i) { return i.area === "Marketing"; });
+    this._todos = todos;
+
+    /* La ventana REAL de los indicadores, cuando no es la que dice el filtro. */
+    var consol = this._esConsolidado(M, D, pp, anioCaja);
+    var winKPI = consol ? "sin carga propia para el período · se muestra " +
+      String(anioCaja) + " completo" : "";
+    this._winKPI = winKPI;
+
+    var inv = this._busca(todos, "Inversión en Publicidad Tradicional y Digital");
+    var cpl = this._busca(todos, "Costo por Lead (CPL)");
+
+    var pagos = this._pagos(D, prefP);
+    var salio = 0;
+    pagos.forEach(function (p) { salio += p.monto; });
+    var sr = this._sinRotulo(D, prefP);
+    this._pagosV = pagos; this._salio = salio; this._sr = sr;
+
+    /* LAS VENTAS DEL PERÍODO, con su origen y su llegada — ver la cabecera. */
+    var VP = this._ventasP(D, pp);
+    this._VP = VP;
+
+    var h = '<div class="d-lienzo">';
+
+    if (!todos.length && !pagos.length && !VP.filas.length) {
+      return h + '<div class="d-carta"><div class="d-cifra">—</div>' +
+        '<div class="d-exacta">AXION no devolvió indicadores, pagos ni ventas en esta lectura</div>' +
+        '<div class="d-pie">data al ' + esc(String(D.publicado || "")) +
+        '</div></div></div>';
+    }
+
+    var EMBm = ((M.crm || {}).embudo) || {};
+    var invV = (inv && inv.valor !== null && inv.valor !== undefined) ? inv.valor : null;
+    var cInv = inv ? this._cobertura(D, inv.indicador) : null;
+    var mesesInv = cInv ? cInv.n : 0;
+    var cierresTramo = null, leadsTramo = null;
+    if (EMBm.por_mes && mesesInv) {
+      cierresTramo = 0; leadsTramo = 0;
+      EMBm.por_mes.forEach(function (x) {
+        if (x.mes <= mesesInv) { cierresTramo += x.vendidos; leadsTramo += x.leads; }
+      });
+    }
+    var costoVenta = (invV && cierresTramo) ? invV / cierresTramo : null;
+    var costoLead = (invV && leadsTramo) ? invV / leadsTramo : null;
+    var MES3M = ["", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul",
+                 "Ago", "Set", "Oct", "Nov", "Dic"];
+    var tramoTxt = (esMes && !consol) ? MES3M[pp.mes]
+      : (mesesInv ? (MES3M[1] + " a " + MES3M[mesesInv]) : "");
+
+    var chispaM = function (serie, sufijo) {
+      var ms = Object.keys(serie).map(Number).sort(function (a, b) { return a - b; });
+      if (!ms.length) return '';
+      var max = 1;
+      ms.forEach(function (m) { max = Math.max(max, serie[m] || 0); });
+      var tt = '<div class="d-chispa">';
+      ms.forEach(function (m) {
+        var v = serie[m] || 0;
+        tt += '<i style="height:' + Math.max(2, Math.round(30 * v / max)) +
+          'px" title="' + esc(MES3M[m]) + ' ' +
+          (sufijo === 'n' ? ent(v) : (sufijo === '%' ? fmt1(v) + '%' : soles(v))) +
+          '"></i>';
+      });
+      return tt + '</div><div class="d-chispa-pie"><span>' + esc(MES3M[ms[0]]) +
+        '</span><span>' + esc(MES3M[ms[ms.length - 1]]) + '</span></div>';
+    };
+    var serieLeads = {}, serieConv = {};
+    (EMBm.por_mes || []).forEach(function (x) {
+      serieLeads[x.mes] = x.leads; serieConv[x.mes] = x.pct;
+    });
+
+    var camp = (EMBm.por_campana || []).slice();
+    var quema = camp.filter(function (x) { return x.vendidos === 0; });
+    var quemaLeads = 0;
+    quema.forEach(function (x) { quemaLeads += x.leads; });
+    var vol = camp.filter(function (x) { return x.leads >= 40; });
+    var mejor = vol.slice().sort(function (a, b) { return b.pct - a.pct; })[0] || null;
+    if (!mejor || !mejor.vendidos) {
+      var conVenta = camp.filter(function (x) { return x.vendidos > 0; })
+        .sort(function (a, b) { return (b.vendidos - a.vendidos) || (b.pct - a.pct); })[0];
+      if (conVenta) mejor = conVenta;
+    }
+    var atm = (M.crm || {}).atencion || {};
+
+    h += '<div class="d-kpis">';
+
+    h += '<div class="d-carta d-kpi-saldo' + (inv ? ' d-abrible abrible' : '') + '"' +
+      (inv ? ' data-abre="mk-inv" aria-expanded="false" tabindex="0" role="button"' : '') +
+      '><div class="d-cab"><span class="d-chip">◎</span>' +
+      '<span class="d-preg">¿Cuánto se invirtió?</span></div>' +
+      '<div class="d-cifra">' + (invV ? solesM(invV) : '—') + '</div>' +
+      '<div class="d-exacta">' + (invV
+        ? (Math.abs(invV) >= 1e4 ? soles(invV) + ' · ' : '') + esc(tramoTxt) +
+          (costoLead ? ' · ' + soles(costoLead) + ' por lead de ' + ent(leadsTramo) : '')
+        : 'sin inversión cargada en el período') + '</div>' +
+      '<div class="d-pie">' + (costoVenta
+        ? '<span class="d-tag">' + soles(costoVenta) + '</span>por venta · ' +
+          ent(cierresTramo) + ' cierres'
+        : 'lo carga Marketing') + '</div>' +
+      chispaM(serieLeads, 'n') + '</div>';
+
+    h += '<div class="d-carta' + (camp.length ? ' d-abrible abrible' : '') + '"' +
+      (camp.length ? ' data-abre="mk-camp" aria-expanded="false" tabindex="0" role="button"' : '') +
+      '><div class="d-cab"><span class="d-chip">◇</span>' +
+      '<span class="d-preg">¿Qué campaña cierra?</span></div>' +
+      '<div class="d-cifra">' + (mejor ? fmt1(mejor.pct) + '%' : '—') + '</div>' +
+      '<div class="d-exacta">' + (mejor
+        ? esc(mejor.clave) + ' · ' + ent(mejor.vendidos) + ' de ' + ent(mejor.leads)
+        : 'sin campañas con volumen') + '</div>' +
+      '<div class="d-pie">' + (quema.length
+        ? '<span class="d-tag mal">' + ent(quema.length) + '</span>sin cerrar nada · ' +
+          ent(quemaLeads) + ' leads'
+        : 'todas con venta') + '</div>' +
+      chispaM(serieConv, '%') + '</div>';
+
+    if (false) h += '<div class="d-carta d-abrible abrible" data-abre="mk-aten"' +
+      ' aria-expanded="false" tabindex="0" role="button">' +
+      '<div class="d-cab"><span class="d-chip">⏱</span>' +
+      '<span class="d-preg">¿Cuánto tardan en llamarlos?</span></div>' +
+      '<div class="d-cifra">' + (atm.mediana !== null && atm.mediana !== undefined
+        ? hs(atm.mediana) : '—') + '</div>' +
+      '<div class="d-exacta">' + (atm.con_llamada
+        ? 'mediana · ' + ent(atm.con_llamada) + ' leads con llamada'
+        : 'sin leads con llamada') + '</div>' +
+      '<div class="d-pie">' + (atm.promedio
+        ? '<span class="d-tag">' + hs(atm.promedio) + '</span>promedio · Comercial'
+        : 'Comercial') + '</div></div>';
+
+    if (false) h += '<div class="d-carta' + (VP.n ? ' d-abrible abrible' : '') + '"' +
+      (VP.n ? ' data-abre="mk-fuente" aria-expanded="false" tabindex="0" role="button"' : '') +
+      '><div class="d-cab"><span class="d-chip">⇢</span>' +
+      '<span class="d-preg">¿Se sabe de dónde vino?</span></div>' +
+      '<div class="d-cifra">' + (VP.n ? ent(VP.con) : '—') + '</div>' +
+      '<div class="d-exacta">' + (VP.n
+        ? 'de ' + ent(VP.n) + (VP.n === 1 ? ' venta cerrada' : ' ventas cerradas')
+        : 'sin ventas cerradas en el período') + '</div>' +
+      '<div class="d-pie">sin esto no hay retorno por sol · Comercial</div></div>';
+
+    var detFila = '<div class="detalle" id="det-mk-inv"></div>' +
+      '<div class="detalle" id="det-mk-camp"></div>';
+
+    if (VP.n) {
+      var top = (VP.canales[0] && VP.canales[0].canal) ? VP.canales[0] : null;
+      var nCan = VP.canales.filter(function (c) { return c.canal; }).length;
+      var dd = VP.dias;
+      var dDias = function (x) {
+        return (x % 1 ? fmt1(x) : ent(x)) + (x === 1 ? ' día' : ' días');
+      };
+      h += '<div class="d-carta d-abrible abrible" data-abre="mk-fuente" ' +
+        'aria-expanded="false" tabindex="0" role="button">' +
+        '<div class="d-cab"><span class="d-chip">⇱</span>' +
+        '<span class="d-preg">¿Por dónde entran las ventas?</span></div>' +
+        '<div class="d-cifra">' + (top ? esc(top.canal) : '—') + '</div>' +
+        '<div class="d-exacta">' + (top
+          ? ent(top.n) + ' de ' + ent(VP.n) + (VP.n === 1 ? ' venta · ' : ' ventas · ') +
+            fmt1(100 * top.n / VP.n) + '%'
+          : 'ninguna venta del período declara su origen') + '</div>' +
+        '<div class="d-pie">' + ent(nCan) + (nCan === 1 ? ' canal' : ' canales') +
+        '</div></div>';
+      if (dd.hay) {
+        h += '<div class="d-carta' + (dd.n ? ' d-abrible abrible' : '') + '"' +
+          (dd.n ? ' data-abre="mk-dias" aria-expanded="false" tabindex="0" role="button"' : '') +
+          '><div class="d-cab"><span class="d-chip">◷</span>' +
+          '<span class="d-preg">¿Cuánto tarda un lead en comprar?</span></div>' +
+          '<div class="d-cifra">' + (dd.mediana !== null ? dDias(dd.mediana) : '—') + '</div>' +
+          '<div class="d-exacta">' + (dd.n
+            ? 'mediana de ' + ent(dd.n) + (dd.n === 1 ? ' venta' : ' ventas') +
+              ' · del lead al contrato'
+            : 'ninguna venta del período trae la llegada del lead') + '</div>' +
+          '<div class="d-pie">' + (dd.promedio !== null
+            ? '<span class="d-tag">' + fmt1(dd.promedio) + ' días</span>promedio'
+            : 'AXION') + '</div></div>';
+      }
+      detFila += '<div class="detalle" id="det-mk-fuente"></div>' +
+        (dd.hay && dd.n ? '<div class="detalle" id="det-mk-dias"></div>' : '');
+    }
+    h += '</div>' + detFila;
+
+
+    this._camp = camp; this._quema = quema; this._atm = atm;
+    this._KA = (((M.crm || {}).kpis_asesor || {}).asesores) || [];
+    this._costoVenta = costoVenta; this._costoLead = costoLead;
+    this._invV = invV; this._tramoTxt = tramoTxt;
+    this._cierresTramo = cierresTramo; this._leadsTramo = leadsTramo;
+
+    if (todos.length) {
+      h += '<div class="d-carta"><h3 class="d-tit">Los ' + ent(todos.length) +
+        ' indicadores</h3>' +
+        '<p class="d-sub">AXION · carga de Marketing · ' +
+        (winKPI || (esMes ? 'el mes elegido' : String(anioCaja))) + '</p>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Indicador</th><th class="num">Valor</th><th class="num">Meta</th>' +
+        '<th class="num">Meses con dato</th><th>Reparto</th>' +
+        '</tr></thead><tbody>';
+      todos.forEach(function (ind, iInd) {
+        var co = self._cobertura(D, ind.indicador);
+        var rep = (ind.desglose || []).map(function (d) {
+          return esc(String(d.dimension || '—')) + ' ' + self._cifra(ind, d.valor);
+        }).join(' · ');
+        var como = esMes ? "" : self._comoSeArma(D, ind);
+        h += '<tr class="fila-obra abrible" data-abre="mk-ind' + iInd +
+          '" aria-expanded="false" tabindex="0" role="button">' +
+          '<td class="obra">' + esc(ind.indicador) + '</td>' +
+          '<td class="num">' + self._cifra(ind, ind.valor) + '</td>' +
+          '<td class="num">' + (ind.meta === null || ind.meta === undefined
+            ? '—' : self._cifra(ind, ind.meta)) + '</td>' +
+          '<td class="num">' + ent(co.n) + ' de ' + ent(co.total) +
+          (como ? ' · ' + esc(como) : '') + '</td>' +
+          '<td>' + (rep || '—') + '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+      todos.forEach(function (ind, iInd) {
+        h += '<div class="detalle" id="det-mk-ind' + iInd + '"></div>';
+      });
+      this._indL = todos;
+    }
+
+    var AM = D.actividades_marketing || {};
+    this._AM = AM; this._amFilas = [];
+    if (AM.hay) {
+      var prefA = pp.hist ? "" : (String(pp.anio || "") +
+        (pp.mes ? "-" + (pp.mes < 10 ? "0" : "") + pp.mes : ""));
+      var minutos = function (a, b) {
+        var ma = /^(\d{1,2}):(\d{2})/.exec(String(a || "")),
+            mb = /^(\d{1,2}):(\d{2})/.exec(String(b || ""));
+        if (!ma || !mb) return 0;
+        var d = (+mb[1] * 60 + +mb[2]) - (+ma[1] * 60 + +ma[2]);
+        return d > 0 ? d : 0;
+      };
+      var EMP = ["Habitat Inmobiliaria", "Habitat Concept", "General", ""];
+      var porP = {}, porCont = {}, nAct = 0;
+      (AM.f || []).forEach(function (r) {
+        if (prefA && String(r[0]).indexOf(prefA) !== 0) return;
+        nAct++;
+        var p = porP[r[1]] = porP[r[1]] || {n: 0, dias: {}, min: 0, emp: {}, filas: []};
+        p.n++; p.dias[r[0]] = 1; p.min += minutos(r[6], r[7]);
+        var e = AM.emp[r[5]] || "";
+        p.emp[EMP.indexOf(e) >= 0 ? e : "otra"] = (p.emp[EMP.indexOf(e) >= 0 ? e : "otra"] || 0) + 1;
+        p.filas.push(r);
+        var c = AM.cont[r[4]] || "(sin tipo de contenido)";
+        porCont[c] = (porCont[c] || 0) + 1;
+      });
+      var gente = Object.keys(porP).map(function (k) {
+        return {i: Number(k), nom: AM.resp[k], d: porP[k]}; })
+        .sort(function (a, b) { return b.d.n - a.d.n; });
+      this._amFilas = gente;
+      var horas = function (m) {
+        return m ? (m / 60).toLocaleString("es-PE", {minimumFractionDigits: 1,
+          maximumFractionDigits: 1}) : '—'; };
+      var contL = Object.keys(porCont).sort(function (a, b) { return porCont[b] - porCont[a]; })
+        .map(function (k) { return esc(k) + ' ' + ent(porCont[k]); });
+      h += '<div class="d-carta"><h3 class="d-tit">Actividades del equipo</h3>' +
+        '<p class="d-sub">AXION · Marketing · ' + ent(nAct) +
+        (nAct === 1 ? ' actividad' : ' actividades') +
+        (contL.length ? ' · ' + textoOtros(contL, 5) : '') + '</p>';
+      if (!gente.length) {
+        h += '<p class="mas">sin actividades cargadas en el período · Marketing</p></div>';
+      } else {
+        var tot = {n: 0, dias: {}, min: 0, emp: {}};
+        h += '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+          '<th>Responsable</th><th class="num">Actividades</th>' +
+          '<th class="num">Días con registro</th><th class="num">Horas registradas</th>' +
+          '<th class="num">Habitat Inmobiliaria</th><th class="num">Habitat Concept</th>' +
+          '<th class="num">General</th><th class="num">Sin empresa</th>' +
+          '</tr></thead><tbody>';
+        gente.forEach(function (g, j) {
+          var x = g.d;
+          tot.n += x.n; tot.min += x.min;
+          Object.keys(x.dias).forEach(function (k) { tot.dias[k] = 1; });
+          EMP.concat(["otra"]).forEach(function (k) { tot.emp[k] = (tot.emp[k] || 0) + (x.emp[k] || 0); });
+          h += '<tr class="abrible" data-abre="mk-act-' + j + '" aria-expanded="false" tabindex="0" role="button">' +
+            '<td class="obra">' + esc(g.nom) + '</td>' +
+            '<td class="num">' + ent(x.n) + '</td>' +
+            '<td class="num">' + ent(Object.keys(x.dias).length) + '</td>' +
+            '<td class="num">' + horas(x.min) + '</td>' +
+            '<td class="num">' + ent(x.emp["Habitat Inmobiliaria"] || 0) + '</td>' +
+            '<td class="num">' + ent(x.emp["Habitat Concept"] || 0) + '</td>' +
+            '<td class="num">' + ent(x.emp["General"] || 0) + '</td>' +
+            '<td class="num">' + ent((x.emp[""] || 0) + (x.emp.otra || 0)) + '</td></tr>';
+        });
+        h += '<tr class="total"><td class="obra">TOTAL · ' + ent(gente.length) +
+          (gente.length === 1 ? ' persona' : ' personas') + '</td>' +
+          '<td class="num">' + ent(tot.n) + '</td>' +
+          '<td class="num">' + ent(Object.keys(tot.dias).length) + '</td>' +
+          '<td class="num">' + horas(tot.min) + '</td>' +
+          '<td class="num">' + ent(tot.emp["Habitat Inmobiliaria"] || 0) + '</td>' +
+          '<td class="num">' + ent(tot.emp["Habitat Concept"] || 0) + '</td>' +
+          '<td class="num">' + ent(tot.emp["General"] || 0) + '</td>' +
+          '<td class="num">' + ent((tot.emp[""] || 0) + (tot.emp.otra || 0)) + '</td></tr>';
+        h += '</tbody></table></div></div>';
+        gente.forEach(function (g, j) {
+          h += '<div class="detalle" id="det-mk-act-' + j + '"></div>';
+        });
+      }
+    }
+
+    h += '</div>';
+    return h;
+  },
+
+  _detActividades: function (j) {
+    var g = (this._amFilas || [])[j], AM = this._AM || {};
+    if (!g) return null;
+    var v = function (lista, i) { var x = (lista || [])[i]; return x ? esc(x) : '—'; };
+    var t = '<button class="cerrar">Cerrar</button>' +
+      '<h3>' + esc(g.nom) + ' · actividades</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Fecha</th><th>Actividad</th><th>Tipo</th><th>Tipo de contenido</th>' +
+      '<th>Empresa</th><th>Inicio</th><th>Fin</th></tr></thead><tbody>';
+    g.d.filas.slice().sort(function (a, b) {
+      return String(b[0]).localeCompare(String(a[0])) ||
+             String(a[6] || "99").localeCompare(String(b[6] || "99")); })
+      .forEach(function (r) {
+        t += '<tr><td>' + esc(r[0]) + '</td>' +
+          '<td class="obra" style="white-space:normal">' + (r[2] ? esc(r[2]) : '—') + '</td>' +
+          '<td>' + v(AM.tipo, r[3]) + '</td><td>' + v(AM.cont, r[4]) + '</td>' +
+          '<td>' + v(AM.emp, r[5]) + '</td>' +
+          '<td>' + (r[6] ? esc(r[6]) : '—') + '</td><td>' + (r[7] ? esc(r[7]) : '—') + '</td></tr>';
+      });
+    return t + '<tr class="total"><td class="obra" colspan="7">TOTAL · ' + ent(g.d.n) +
+      (g.d.n === 1 ? ' actividad' : ' actividades') + '</td></tr></tbody></table></div>';
+  },
+
+  _tablaInd: function (D, ind, soloMes) {
+    var self = this, NE = "No existe";
+    var ser = this._serie(D, ind.indicador);
+    var dims = [], visto = {}, desgMes = {};
+    var agrega = function (lista) {
+      (lista || []).forEach(function (d) {
+        var k = String(d.dimension || NE);
+        if (!visto[k]) { visto[k] = 1; dims.push(k); }
+      });
+    };
+    ser.forEach(function (x) {
+      ((D.meses[String(x.mes)] || {}).indicadores || []).forEach(function (i) {
+        if (i.area === "Marketing" && i.indicador === ind.indicador) {
+          desgMes[x.mes] = i.desglose || [];
+          agrega(i.desglose);
+        }
+      });
+    });
+    if (!soloMes) agrega(ind.desglose);
+    var celdaDim = function (lista, k) {
+      var v = null;
+      (lista || []).forEach(function (d) {
+        if (String(d.dimension || NE) === k) v = d.valor;
+      });
+      return (v === null || v === undefined) ? NE : self._cifra(ind, v);
+    };
+    var h = '<div class="envoltura-tabla"><table class="datos"><thead><tr><th>Mes</th>';
+    dims.forEach(function (k) { h += '<th class="num">' + esc(k) + '</th>'; });
+    h += '<th class="num">' + (dims.length ? 'Total del mes' : 'Valor') + '</th>' +
+      '</tr></thead><tbody>';
+    ser.forEach(function (x) {
+      var vale = x.valor !== null && x.valor !== undefined;
+      h += '<tr><td class="obra">' + esc(mesLargo(x.clave)) +
+        (soloMes && x.mes === soloMes ? '<span class="ob-sub"> mes elegido</span>' : '') + '</td>';
+      dims.forEach(function (k) {
+        h += '<td class="num">' + celdaDim(desgMes[x.mes], k) + '</td>';
+      });
+      h += '<td class="num">' + (vale ? self._cifra(ind, x.valor) : NE) + '</td></tr>';
+    });
+    if (!soloMes) {
+      var como = this._comoSeArma(D, ind);
+      h += '<tr class="total"><td class="obra">TOTAL' + (como ? ' · ' + esc(como) : '') + '</td>';
+      dims.forEach(function (k) {
+        h += '<td class="num">' + celdaDim(ind.desglose, k) + '</td>';
+      });
+      h += '<td class="num">' + self._cifra(ind, ind.valor) + '</td></tr>';
+    }
+    return h + '</tbody></table></div>';
+  },
+
+
+  _panelMK: function (id, t) {
+    var VP = this._VP || {canales: [], n: 0, monto: 0, dias: {tramos: []}};
+    var NE = 'No existe';
+    if (id === "mk-fuente") {
+      if (VP.n && !VP.con) {
+        var pv = {};
+        VP.filas.forEach(function (r) {
+          var kv = String(((r.d || [])[5]) || "").trim();
+          kv = (!kv || kv.charAt(0) === "—") ? NE : kv;
+          var o = pv[kv] = pv[kv] || {n: 0, m: 0};
+          o.n++; o.m += r.monto || 0;
+        });
+        var hv = t + '<h3>Ventas sin origen declarado · por vendedor</h3>' +
+          '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+          '<th>Vendedor</th><th class="num">Ventas sin origen</th>' +
+          '<th class="num">% de las ventas</th><th class="num">Monto</th></tr></thead><tbody>';
+        Object.keys(pv).sort(function (x, y) { return pv[y].n - pv[x].n || pv[y].m - pv[x].m; })
+          .forEach(function (kv) {
+            hv += '<tr><td class="obra">' + esc(kv) + '</td>' +
+              '<td class="num">' + ent(pv[kv].n) + '</td>' +
+              '<td class="num">' + fmt1(100 * pv[kv].n / VP.n) + '%</td>' +
+              '<td class="num">' + soles(pv[kv].m) + '</td></tr>';
+          });
+        return hv + '<tr class="total"><td class="obra">TOTAL</td><td class="num">' + ent(VP.n) +
+          '</td><td class="num">100.0%</td><td class="num">' + soles(VP.monto) + '</td></tr>' +
+          '</tbody></table></div>';
+      }
+      var h = t + '<h3>De dónde entran las ventas · canal y subcanal</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Canal</th><th>Subcanal</th><th class="num">Ventas</th>' +
+        '<th class="num">% de las ventas</th><th class="num">Monto</th>' +
+        '</tr></thead><tbody>';
+      VP.canales.forEach(function (c) {
+        c.subs.forEach(function (s) {
+          h += '<tr><td class="obra">' + esc(c.canal || NE) + '</td>' +
+            '<td>' + esc(s.sub || NE) + '</td>' +
+            '<td class="num">' + ent(s.n) + '</td>' +
+            '<td class="num">' + (VP.n ? fmt1(100 * s.n / VP.n) : '0.0') + '%</td>' +
+            '<td class="num">' + soles(s.monto) + '</td></tr>';
+        });
+      });
+      return h + '<tr class="total"><td class="obra">TOTAL</td><td></td>' +
+        '<td class="num">' + ent(VP.n) + '</td><td class="num">100.0%</td>' +
+        '<td class="num">' + soles(VP.monto) + '</td></tr></tbody></table></div>';
+    }
+    var d = VP.dias || {tramos: []};
+    var hd = t + '<h3>Del lead al contrato · por tramos</h3>' +
+      '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+      '<th>Días del lead al contrato</th><th class="num">Ventas</th>' +
+      '<th class="num">% de las medidas</th></tr></thead><tbody>';
+    (d.tramos || []).forEach(function (x) {
+      hd += '<tr><td class="obra">' + esc(x.rot) + '</td>' +
+        '<td class="num">' + ent(x.n) + '</td>' +
+        '<td class="num">' + (d.n ? fmt1(100 * x.n / d.n) : '0.0') + '%</td></tr>';
+    });
+    hd += '<tr class="total"><td class="obra">TOTAL medido · el más lento ' +
+      (d.max === null || d.max === undefined ? NE : ent(d.max) + ' días') + '</td>' +
+      '<td class="num">' + ent(d.n || 0) + '</td><td class="num">100.0%</td></tr>';
+    if (d.sinFecha) {
+      hd += '<tr class="total"><td class="obra">Sin fecha de llegada del lead · Comercial</td>' +
+        '<td class="num">' + ent(d.sinFecha) + '</td><td class="num">' + NE + '</td></tr>';
+    }
+    if (d.imposibles) {
+      hd += '<tr class="total"><td class="obra">Fecha imposible: venta antes del lead o ' +
+        'más de 400 días · Comercial</td>' +
+        '<td class="num">' + ent(d.imposibles) + '</td><td class="num">' + NE + '</td></tr>';
+    }
+    return hd + '</tbody></table></div>';
+  },
+
+  detalle: function (id, el) {
+    var self = this;
+    var t = '<button class="cerrar">Cerrar</button>';
+    var D = this._D || null;
+    if (id === "mk-fuente" || id === "mk-dias") return this._panelMK(id, t);
+
+    var ppD = perPartes();
+    var anioD = Number(((D || {}).flujo || {}).anio || 0);
+    var soloMes = (!ppD.hist && ppD.mes && ppD.anio === anioD) ? ppD.mes : null;
+    var rotPer = soloMes
+      ? mesLargo(String(anioD) + "-" + (soloMes < 10 ? "0" : "") + soloMes)
+      : String(anioD);
+    var NE = 'No existe';
+    var tablaNE = function () {
+      return '<div class="envoltura-tabla"><table class="datos"><tbody>' +
+        '<tr><td class="obra">' + NE + '</td></tr></tbody></table></div>';
+    };
+
+    if (String(id).indexOf("mk-ind") === 0) {
+      var ind = (this._indL || [])[parseInt(id.slice(6), 10)];
+      if (!ind || !D) return null;
+      return t + '<h3>' + esc(ind.indicador) + ' · ' + esc(rotPer) + '</h3>' +
+        this._tablaInd(D, ind, soloMes);
+    }
+
+    if (id.indexOf("mk-act-") === 0) return this._detActividades(Number(id.slice(7)));
+    if (id === "mk-camp") {
+      var C = this._camp || [];
+      var tc = t + '<h3>Campañas · ordenado por conversión</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Campaña</th><th class="num">Leads</th><th class="num">Cierres</th>' +
+        '<th class="num">Conversión</th></tr></thead><tbody>';
+      var tl = 0, tv = 0;
+      C.slice().sort(function (a, b) { return b.pct - a.pct; }).forEach(function (x) {
+        tl += x.leads; tv += x.vendidos;
+        tc += '<tr><td class="obra">' + esc(x.clave) + '</td>' +
+          '<td class="num">' + ent(x.leads) + '</td>' +
+          '<td class="num">' + ent(x.vendidos) + '</td>' +
+          '<td class="num"' + (x.vendidos === 0 ? ' style="color:var(--rojo)"' : '') +
+          '>' + fmt1(x.pct) + '%</td></tr>';
+      });
+      return tc + '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + ent(tl) + '</td><td class="num">' + ent(tv) + '</td>' +
+        '<td class="num">' + (tl ? fmt1(100 * tv / tl) : '0.0') + '%</td></tr>' +
+        '</tbody></table></div>';
+    }
+
+    if (id === "mk-aten") {
+      var A = this._atm || {};
+      var KA = (this._KA || []).slice();
+      var n1 = function (v) {
+        return (v === null || v === undefined || isNaN(v)) ? NE
+          : Number(v).toLocaleString("es-PE", {minimumFractionDigits: 1, maximumFractionDigits: 1});
+      };
+      var enH = function (v) { return (v === null || v === undefined) ? null : v / 60; };
+      KA.sort(function (x, y) {
+        var p = x.respuesta_prom_min, q = y.respuesta_prom_min;
+        if (p === null || p === undefined) return 1;
+        if (q === null || q === undefined) return -1;
+        return p - q;
+      });
+      var ta = t + '<h3>¿Cuánto tardan en llamarlos? · por asesor</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Asesor</th><th class="num">Con llamada</th>' +
+        '<th class="num">Mediana (h)</th><th class="num">Promedio (h)</th>' +
+        '<th class="num">Llamada antes del lead</th></tr></thead><tbody>';
+      if (!KA.length) return ta + '<tr><td class="obra">' + NE + '</td>' +
+        '<td class="num">' + NE + '</td><td class="num">' + NE + '</td>' +
+        '<td class="num">' + NE + '</td><td class="num">' + NE + '</td></tr>' +
+        '</tbody></table></div>';
+      KA.forEach(function (x) {
+        ta += '<tr><td class="obra">' + esc(x.responsable) + '</td>' +
+          '<td class="num">' + (x.con_llamada === undefined ? NE : ent(x.con_llamada)) + '</td>' +
+          '<td class="num">' + n1(enH(x.respuesta_min)) + '</td>' +
+          '<td class="num">' + n1(enH(x.respuesta_prom_min)) + '</td>' +
+          '<td class="num">' + (x.llamada_antes === undefined ? NE : ent(x.llamada_antes)) +
+          '</td></tr>';
+      });
+      return ta + '<tr class="total"><td class="obra">TOTAL · equipo</td>' +
+        '<td class="num">' + ent(A.con_llamada || 0) + '</td>' +
+        '<td class="num">' + n1(A.mediana) + '</td>' +
+        '<td class="num">' + n1(A.promedio) + '</td>' +
+        '<td class="num">' + ent(A.negativas || 0) + '</td></tr>' +
+        '</tbody></table></div>';
+    }
+
+    if (id === "mk-inv" || id === "mk-cpl") {
+      var indI = this._busca(this._todos || [],
+        id === "mk-inv" ? "Inversión en Publicidad Tradicional y Digital"
+                        : "Costo por Lead (CPL)");
+      if (!indI || !D) {
+        return t + '<h3>' + (id === "mk-inv" ? 'Inversión en publicidad' : 'Costo por lead') +
+          ' · ' + esc(rotPer) + '</h3>' + tablaNE();
+      }
+      return t + '<h3>' + esc(indI.indicador) + ' · ' + esc(rotPer) + '</h3>' +
+        this._tablaInd(D, indI, soloMes);
+    }
+
+    if (id === "mk-caja") {
+      var pagos = (this._pagosV || []).slice()
+        .sort(function (a, b) { return b.monto - a.monto; });
+      var sr = this._sr || {};
+      var h2 = t + '<h3>Salió de caja como marketing · ' + soles(this._salio || 0) +
+        '</h3>';
+      if (!pagos.length) {
+        h2 += '<p class="linea-meta">Ningún pago del período lleva la ' +
+          'categoría Marketing ni Publicidad.</p>';
+      } else {
+        h2 += '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+          '<th>Fecha</th><th>Concepto</th><th>Categoría</th><th>Cuenta</th>' +
+          '<th class="num">Monto</th></tr></thead><tbody>';
+        pagos.forEach(function (p) {
+          h2 += '<tr><td class="obra">' + esc(p.fecha) + '</td>' +
+            '<td>' + esc(p.concepto) + '</td>' +
+            '<td>' + esc(p.cat) + '</td>' +
+            '<td>' + esc(p.cuenta || '(sin cuenta)') + '</td>' +
+            '<td class="num">' + soles(p.monto) + '</td></tr>';
+        });
+        h2 += '</tbody></table></div>';
+      }
+      h2 += '<p class="linea-meta">' + (sr.filas
+        ? 'Sin categoría en el mismo período: ' + soles(sr.monto || 0) +
+          ' en ' + ent(sr.filas || 0) + ' pagos · ' + fmt1(sr.pct || 0) +
+          '% de ' + soles(sr.total || 0) + ' — quien rotula es Administración'
+        : 'Sin categoría en el mismo período: 0 pagos de ' +
+          ent(sr.filasTotal || 0)) + '</p>';
+      return h2;
+    }
+
+    if (id === "mk-avisos") {
+      var avs = this._avs || [];
+      var h4 = t + '<h3>Carga pendiente · el caso de cada uno</h3>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Aviso</th><th>Caso</th><th>Gravedad</th><th>Decide</th>' +
+        '</tr></thead><tbody>';
+      avs.forEach(function (a) {
+        h4 += '<tr><td class="obra"' + (a.grave ? ' style="color:var(--rojo)"' : '') + '>' +
+          esc(String(a.titulo || '')) + '</td>' +
+          '<td style="white-space:normal">' + esc(String(a.detalle || '')) + '</td>' +
+          '<td>' + (a.grave ? 'grave' : 'criterio') + '</td>' +
+          '<td>' + esc(String(a.area || 'Marketing')) + '</td></tr>';
+      });
+      return h4 + '</tbody></table></div>';
+    }
+
+    return null;
+  },
+
+  _rotDesglose: function (ind) {
+    var tipos = {}, n = 0;
+    (ind.desglose || []).forEach(function (d) {
+      var k = String(d.tipo || "");
+      if (k && !tipos[k]) { tipos[k] = 1; n++; }
+    });
+    if (n !== 1) return "Reparto";
+    var k = Object.keys(tipos)[0];
+    var rot = {plataforma: "Plataforma", formato: "Formato",
+               tipo_inversion: "Tipo de inversión"}[k];
+    if (rot) return rot;
+    var k2 = k.replace(/_/g, " ");
+    return k2.charAt(0).toUpperCase() + k2.slice(1);
+  },
+
+  conectar: function () {}
+};
+</script>
+<script src="cockpit.js"></script>
+
+</body>
+</html>

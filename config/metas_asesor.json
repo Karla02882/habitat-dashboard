@@ -1,0 +1,45 @@
+{
+  "respuesta_min": {
+    "meta": 60,
+    "mejor": "menor",
+    "ambar": 120,
+    "rotulo": "Tiempo de primera respuesta",
+    "unidad": "min"
+  },
+  "pct_agendadas_sobre_leads": {
+    "meta": 15,
+    "mejor": "mayor",
+    "ambar": 12,
+    "rotulo": "Visitas agendadas",
+    "unidad": "%"
+  },
+  "pct_citas_realizadas": {
+    "meta": 80,
+    "mejor": "mayor",
+    "ambar": 64,
+    "rotulo": "Visitas realizadas",
+    "unidad": "%"
+  },
+  "pct_seguimiento": {
+    "meta": 90,
+    "mejor": "mayor",
+    "ambar": 72,
+    "rotulo": "Seguimientos realizados",
+    "unidad": "%"
+  },
+  "ventas": {
+    "meta": 4,
+    "mejor": "mayor",
+    "ambar": 3,
+    "rotulo": "Ventas cerradas",
+    "unidad": "n",
+    "desglose": "2 lotes · 1 depa · 1 casa u oficina"
+  },
+  "monto": {
+    "meta": 450000,
+    "mejor": "mayor",
+    "ambar": 360000,
+    "rotulo": "Monto vendido",
+    "unidad": "S/"
+  }
+}
