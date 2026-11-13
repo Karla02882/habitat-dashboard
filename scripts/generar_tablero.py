@@ -22,7 +22,7 @@ from src import (areas, asesores_axion, auditoria, cierre, cola_registro, crm,  
                  libro_gastos,
                  movimientos, periodo, reloj, rentabilidad, vencimientos,
                  resultados, scorecard,
-                 validacion)
+                 validacion, realtime)
 
 
 def _logo() -> str:
@@ -3756,6 +3756,10 @@ if(btn){{btn.addEventListener('click',async()=>{{
     _publicar(_destino / "tablero_datos.json",
               json.dumps(_sin_nan(d), ensure_ascii=False, indent=1,
                          allow_nan=False))
+    try:
+        realtime.actualizar_datos("tablero", d)
+    except Exception:
+        pass
 
     try:
         _sobre = {
@@ -3772,6 +3776,10 @@ if(btn){{btn.addEventListener('click',async()=>{{
         _publicar(_destino / "stock_datos.json",
                   json.dumps(_sin_nan(_sobre), ensure_ascii=False, indent=1,
                              allow_nan=False))
+        try:
+            realtime.actualizar_datos("stock", _sobre)
+        except Exception:
+            pass
         if _st.get("hay"):
             _t = _st["totales"]
             print(f"  stock_datos.json · {_t['proyectos']} proyectos · "
@@ -3800,6 +3808,10 @@ if(btn){{btn.addEventListener('click',async()=>{{
         _publicar(_destino / "finanzas_datos.json",
                   json.dumps(_sin_nan(_fin), ensure_ascii=False, indent=1,
                              allow_nan=False))
+        try:
+            realtime.actualizar_datos("finanzas", _fin)
+        except Exception:
+            pass
         print(f"  finanzas_datos.json · {len(_fin)} claves · "
               f"{len(_fin['areas_filas'].get('Cobranza', [{}])[0].get('filas', [])) if _fin['areas_filas'] else 0} "
               f"cuotas por vencer")
@@ -3825,6 +3837,10 @@ if(btn){{btn.addEventListener('click',async()=>{{
         _publicar(_destino / "obras_datos.json",
                   json.dumps(_sin_nan(_ob), ensure_ascii=False, indent=1,
                              allow_nan=False))
+        try:
+            realtime.actualizar_datos("obras", _ob)
+        except Exception:
+            pass
         print(f"  obras_datos.json · {len(_ob)} claves · {len(_gastos)} gastos del libro")
     except Exception as e:  # noqa: BLE001
         print(f"  el archivo de Obras no se pudo generar: {type(e).__name__}: {e}")
@@ -3835,6 +3851,10 @@ if(btn){{btn.addEventListener('click',async()=>{{
         _publicar(_destino / "ventas_datos.json",
                   json.dumps(_sin_nan(_ve), ensure_ascii=False, indent=1,
                              allow_nan=False))
+        try:
+            realtime.actualizar_datos("ventas", _ve)
+        except Exception:
+            pass
         print(f"  ventas_datos.json · {len(_ve)} claves · "
               f"{len(_ve['libro']['filas']['f'])} gastos del libro")
     except Exception as e:  # noqa: BLE001

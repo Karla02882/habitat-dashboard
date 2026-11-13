@@ -2092,3 +2092,14 @@ document.addEventListener("click", function(e){
   }
   _adelantar(cand);
 }, true);
+
+if (window.REALTIME) {
+  REALTIME.suscribir("tablero", function(datos) {
+    D = datos;
+    pintarCabDer(window.HOJA || {});
+    if (window.__llenarObras) window.__llenarObras();
+    pintarFuentes((window.HOJA || {}).fuentes);
+    pintar();
+  });
+}
+

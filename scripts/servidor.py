@@ -1704,6 +1704,19 @@ def main() -> int:
     else:
         print("CONTROLES AUTOMÁTICOS APAGADOS (CONTROLES_CADA_HORAS=0). "
               "Quedan el botón de la hoja Estado y CONTROL_FINAL.bat.")
+    
+    def _iniciar_tiempo_real() -> None:
+        """Inicia WebSocket para actualización en tiempo real."""
+        try:
+            from src import websocket_server
+            websocket_server.iniciar_tiempo_real(puerto_ws=5000)
+        except ImportError as e:
+            print(f"  Advertencia: módulos de realtime no disponibles: {e}")
+        except Exception as e:
+            print(f"  Error iniciando tiempo real: {e}")
+    
+    threading.Thread(target=_iniciar_tiempo_real, daemon=True).start()
+    
     try:
         servidor.serve_forever()
     except KeyboardInterrupt:
