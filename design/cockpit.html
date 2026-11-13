@@ -595,7 +595,7 @@ window.REGISTRO = {};
       var hayAnt = mesY > 1 || !!(D.meses || {})[(anioCaja - 1) + "-12"];
       var dNow = datosMes(mesY),
           dAnt = !hayAnt ? null
-               : (mesY > 1 ? datosMes(mesY - 1, diaCorte) : datosMes(12, diaCorte, anioCaja - 1));
+               : (mesY > 1 ? datosMes(mesY - 1) : datosMes(12, null, anioCaja - 1));
       var rotAnt = mesY > 1 ? MESLY[mesY - 1] : "Diciembre " + (anioCaja - 1);
       var deltaY = function (a, b) {
         return (b && b > 0) ? (100 * (a - b) / b) : null; };
@@ -1131,9 +1131,6 @@ window.REGISTRO = {};
           {rot: "Hoy · AXION" + (this._fechaTope ? " · " + this._fechaTope.slice(8, 10) +
                 " de " + (MESL[Number(this._fechaTope.slice(5, 7))] || "").toLowerCase() : ""),
            m: hoyCorto, num: true}];
-        if (hayBco) colsS.push({rot: "Banco · " + dia,
-                                m: "Banco · " + Number(fBanco.slice(8, 10)) + " " + m3(Number(fBanco.slice(5, 7))), num: true},
-                               {rot: "Diferencia", num: true});
         var hS = t + '<i data-modal-ancho="1" hidden></i><h3>El dinero, cuenta por cuenta' +
           (this._fechaTope ? ' · al ' + esc(this._fechaTope) : '') + '</h3>' + cabeza(colsS, "tj-3 cab-fija");
         if (!(this._saldos || []).length) return hS + filaNE(colsS) + cierra;
@@ -1157,26 +1154,14 @@ window.REGISTRO = {};
             '<td class="num">' + (hayMov ? soles(egrM) : NE) + '</td>' +
             '<td class="num"' + (x.saldo < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
             soles(x.saldo) + '</td>' +
-            (hayBco ? '<td class="num">' + (tieneB ? soles(x.bhoy) +
-                        (subB ? '<span class="ob-sub">' + esc(subB) + '</span>' : '')
-                        : NE) + '</td>' +
-                      '<td class="num"' + (hayAxb && Math.abs(dif) >= 0.01 ? ' style="color:var(--rojo)"' : '') + '>' +
-                      (hayAxb ? (Math.abs(dif) < 0.01 ? soles(0) : (dif > 0 ? '+' : '') + soles(dif)) : NE) +
-                      '</td>' : '') +
             '</tr>';
         });
-        hS += '<tr class="total"><td class="obra">TOTAL' +
-          (hayBco ? '<span class="ob-sub">banco y diferencia: ' + nB + ' de ' +
-                    this._saldos.length + ' cuentas</span>' : '') + '</td>' +
+        hS += '<tr class="total"><td class="obra">TOTAL</td>' +
           '<td class="num">' + soles(tC) + '</td>' +
           '<td class="num">' + soles(tI) + '</td>' +
           '<td class="num">' + soles(tE) + '</td>' +
           '<td class="num"' + (this._totSaldo < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
-          soles(this._totSaldo) + '</td>' +
-          (hayBco ? '<td class="num">' + soles(tB) +
-                    (nB ? '<span class="ob-sub">AXION ' + soles(tA) + '</span>' : '') + '</td>' +
-                    '<td class="num"' + (Math.abs(tD) >= 0.01 ? ' style="color:var(--rojo)"' : '') + '>' +
-                    (Math.abs(tD) < 0.01 ? soles(0) : (tD > 0 ? '+' : '') + soles(tD)) + '</td>' : '') + '</tr>';
+          soles(this._totSaldo) + '</td></tr>';
         return hS + cierra +
           '<div class="d-pie" style="margin-top:10px">' +
           '<button class="pill-emp abrible" type="button" data-abre="d-mesmes" ' +
@@ -1334,9 +1319,8 @@ window.REGISTRO = {};
             '<td class="num"' + (dd !== null && dd < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
             (dd !== null ? (dd >= 0 ? '+' : '') + fmt1(dd) + '%' : NE) + '</td></tr>';
         };
-        var diasEv = (ev0.dAnt && ev0.dAnt.hasta) ? ' · días 1–' + ev0.dAnt.hasta : '';
         return t + '<h3>' + esc(ev0.MESLY[ev0.mesY]) +
-          (ev0.dAnt ? ' contra ' + esc(ev0.rotAnt) : '') + esc(diasEv) + '</h3>' +
+          (ev0.dAnt ? ' contra ' + esc(ev0.rotAnt) : '') + '</h3>' +
           '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
           '<th></th><th class="num">' + esc(ev0.dAnt ? ev0.rotAnt : 'Mes anterior') +
           '</th><th class="num">' + esc(ev0.MESLY[ev0.mesY]) +
