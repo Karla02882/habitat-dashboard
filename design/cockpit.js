@@ -555,7 +555,8 @@ fetch("/quien", {cache: "no-store"})
         }
         c.innerHTML = "<b>No se pudo leer <code>tablero_datos.json</code>.</b><br>" +
           esc(e.message) + "<br>Hay que servir esta página, no abrirla con doble clic:<br>" +
-          "<code>venv/Scripts/python.exe -X utf8 scripts/servidor.py</code>";
+          "Si es local, inicia el servidor con:<br>" +
+          "<code>python -X utf8 scripts/servidor.py</code>";
       })
       .catch(function () {
         c.innerHTML = "<b>No se pudo leer <code>tablero_datos.json</code>.</b><br>" +

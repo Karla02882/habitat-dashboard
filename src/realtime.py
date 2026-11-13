@@ -179,7 +179,7 @@ def diferencia_desde(canal: str, timestamp_anterior: float) -> dict | None:
 
 # Thread worker para actualizar datos periódicamente
 _WORKER_VIVO = False
-_WORKER_CANDACO = threading.Lock()
+_WORKER_CANDADO = threading.Lock()
 
 
 def iniciar_worker_tiempo_real(intervalo_s: int = 30) -> None:
@@ -236,7 +236,7 @@ def iniciar_worker_tiempo_real(intervalo_s: int = 30) -> None:
                 print(f"  Error en worker realtime: {e}")
                 time.sleep(5)
     
-    with _WORKER_CANDACO:
+    with _WORKER_CANDADO:
         if not _WORKER_VIVO:
             _WORKER_VIVO = True
             thread = threading.Thread(target=worker, daemon=True, name="realtime-worker")
@@ -247,7 +247,7 @@ def iniciar_worker_tiempo_real(intervalo_s: int = 30) -> None:
 def detener_worker_tiempo_real() -> None:
     """Detiene el worker de tiempo real."""
     global _WORKER_VIVO
-    with _WORKER_CANDACO:
+    with _WORKER_CANDADO:
         _WORKER_VIVO = False
 
 

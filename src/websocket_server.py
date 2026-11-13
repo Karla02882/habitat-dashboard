@@ -75,7 +75,7 @@ class ServidorTiempoReal:
         @self.socketio.on("disconnect")
         def handle_disconnect():
             sid = request.sid
-            with self._candaco:
+            with self._candado:
                 self._clientes_conectados.pop(sid, None)
             print(f"  [WS] Cliente desconectado: {sid}")
         
@@ -94,7 +94,7 @@ class ServidorTiempoReal:
                 return
             
             # Registrar suscripción
-            with self._candaco:
+            with self._candado:
                 if sid not in self._clientes_conectados:
                     self._clientes_conectados[sid] = {}
                 self._clientes_conectados[sid][canal] = desde
@@ -122,7 +122,7 @@ class ServidorTiempoReal:
             sid = request.sid
             canal = data.get("canal", "")
             
-            with self._candaco:
+            with self._candado:
                 if sid in self._clientes_conectados:
                     self._clientes_conectados[sid].pop(canal, None)
             
@@ -139,7 +139,7 @@ class ServidorTiempoReal:
         
         # Registrar callback de realtime para notificaciones
         def notificar_cambio(canal: str, datos):
-            with self._candaco:
+            with self._candado:
                 for sid, canales in self._clientes_conectados.items():
                     if canal in canales:
                         self.socketio.emit(
@@ -180,7 +180,7 @@ class ServidorTiempoReal:
             except Exception as e:
                 print(f"  Error en servidor WebSocket: {e}")
         
-        with self._candaco:
+        with self._candado:
             if self._corriendo:
                 return True
             
@@ -192,7 +192,7 @@ class ServidorTiempoReal:
     
     def detener(self) -> None:
         """Detiene el servidor WebSocket."""
-        with self._candaco:
+        with self._candado:
             self._corriendo = False
         if self.socketio:
             self.socketio.stop()
