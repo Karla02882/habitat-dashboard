@@ -1619,6 +1619,11 @@ class ConClave(SimpleHTTPRequestHandler):
             return
         super().do_HEAD()
 
+    def end_headers(self) -> None:
+        if self._ruta() in ("/design/cockpit.html", "/design/cockpit.js"):
+            self.send_header("Cache-Control", "no-store, max-age=0")
+        super().end_headers()
+
     def log_message(self, formato: str, *args) -> None:  # noqa: A002
         pass
 
