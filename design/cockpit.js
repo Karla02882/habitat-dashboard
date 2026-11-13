@@ -2009,7 +2009,19 @@ function vigilar(){
       if (visto && m && m !== visto) refrescarDatos(avisoDatosAplicados);
       if (m) visto = m;
     }).catch(function(){});
-  }, 120000);
+  }, 5000);
+}
+
+if (window.REALTIME) {
+  window.REALTIME.on("actualizacion", function (evento) {
+    if (!evento || evento.canal !== "tablero" || !evento.datos) return;
+    D = evento.datos;
+    pintarCabDer(window.HOJA || {});
+    if (window.__llenarObras) window.__llenarObras();
+    pintarFuentes((window.HOJA || {}).fuentes);
+    pintar();
+    avisoDatosAplicados();
+  });
 }
 
 function _valorCelda(td) {
