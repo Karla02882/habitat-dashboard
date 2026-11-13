@@ -1026,26 +1026,19 @@ window.REGISTRO = {};
           '<td class="num">' + soles(s) + '</td>' +
           '<td class="num"' + (acum < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
           soles(acum) + '</td>' +
-          '<td class="num">' + (real === null ? NE : soles(real) +
-            (r.cuentas ? '<span class="ob-sub">' + r.cuentas + ' cuentas' +
-               (fueraDe ? ' · sin banco ' + soles(fueraDe) + ' fuera' : '') + '</span>' : '')) +
-          '</td>' +
-          '<td class="num"' + (dif !== null && dif < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
-          (dif === null ? NE : conSigno(dif)) + '</td></tr>';
+          '</tr>';
       });
       var h = '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
         '<th>Mes</th><th class="num">Saldo inicial</th><th class="num">Entró</th>' +
         '<th class="num">Salió</th><th class="num">Saldo final</th>' +
-        '<th class="num">En cuentas</th><th class="num">Diferencia · Administración</th></tr></thead><tbody>' +
+        '</tr></thead><tbody>' +
         filas +
         '<tr class="total"><td class="obra">' + esc(String(this._anioCaja)) + ' · del arranque a hoy</td>' +
         '<td class="num">' + soles(arr) + '</td>' +
         '<td class="num">' + soles(tE) + '</td>' +
         '<td class="num">' + soles(tS) + '</td>' +
         '<td class="num"' + (acum < 0 ? ' style="color:var(--rojo)"' : '') + '>' + soles(acum) + '</td>' +
-        '<td class="num">' + (esUltimo ? soles(ultReal) : NE) + '</td>' +
-        '<td class="num"' + (esUltimo && ultDif < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
-        (esUltimo ? conSigno(ultDif) : NE) + '</td></tr>' +
+        '</tr>' +
         '</tbody></table></div>' +
         '';
       return h;
@@ -6316,7 +6309,7 @@ window.REGISTRO = {};
         h3 += '<tr class="total"><td class="obra">Promedio del mes</td><td class="num">' +
           soles(st.prom) + '</td></tr>';
         if (st.saldo) {
-          h3 += '<tr class="total"><td class="obra">En cuentas al cierre de ' + esc(st.saldo.nombre) +
+          h3 += '<tr class="total"><td class="obra">Saldo real al cierre de ' + esc(st.saldo.nombre) +
             '</td><td class="num">' + soles(st.saldo.real) + '</td></tr>';
         }
         return h3 + cierre;
