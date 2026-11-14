@@ -886,20 +886,6 @@ function sello(texto, destinoId){
   } : null;
 }
 
-function avisoMesEnCurso(){
-  var ms = ((D.flujo || {}).meses) || [];
-  var enc = null;
-  for (var i = 0; i < ms.length; i++) if (ms[i].en_curso) { enc = ms[i]; break; }
-  if (!enc || String(enc.mes) !== String(P)) return "";
-  var f = String(D.publicado || D.generado || "").slice(0, 10);
-  var t = f.split("-");
-  if (t.length < 3) return "";
-  var dia = Number(t[2]), dias = new Date(Number(t[0]), Number(t[1]), 0).getDate();
-  if (!dia || !dias) return "";
-  return '<p class="linea-meta"><b>' + enc.etiqueta + '</b> · día ' + dia +
-    ' de ' + dias + ' · data al ' + f + '</p>';
-}
-
 function pintar(){
   var abiertos = [].slice.call(document.querySelectorAll(
     '[data-abre][aria-expanded="true"]')).map(function(el){
@@ -920,7 +906,7 @@ function pintar(){
   ajustarBandaFiltros();
   resumirFiltros();
   document.getElementById("hoja").innerHTML =
-    avisoMesEnCurso() + (H.pintar ? H.pintar(M, D) : "");
+    (H.pintar ? H.pintar(M, D) : "");
   conectarAbribles();
   if (H.conectar) H.conectar(M, D);
   medirFiltrosTabla();
