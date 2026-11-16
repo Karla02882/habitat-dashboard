@@ -104,16 +104,18 @@ window.HOJA = {
     };
     var Fb0 = ((D.libro || {}).filas) || {};
     var noms0 = Fb0.cuenta || [], obrasLib0 = Fb0.obra || [];
+    var rxTraspasoIngreso = /se\s+(deposit[oó]|retir[oó])|retiro\s+de|traspaso/i;
     var esFilaSaldo = function (r) {
       return r[7] === "presupuesto" &&
         String(r[3] || "").trim().toUpperCase().indexOf("SALDO") === 0;
     };
-    var entroDe = function (pref) {
+    var entroDe = function (pref, sinTraspasos) {
       var s = 0;
       (Fb0.f || []).forEach(function (r) {
         if (pref && String(r[0] || "").indexOf(pref) !== 0) return;
         if (r[7] !== "venta" && r[7] !== "presupuesto") return;
         if (esFilaSaldo(r)) return;
+        if (sinTraspasos && rxTraspasoIngreso.test(String(r[3] || ""))) return;
         var cu = noms0[r[6]];
         if (!entraBanco(cu)) return;
         if (!self._entraRSCuenta(cu)) return;
@@ -153,11 +155,13 @@ window.HOJA = {
 
     var entro = (esMes || esAnio || pp.hist || pp.anio)
       ? entroDe(prefP) : 0;
+    var entroSinTraspasos = (esMes || esAnio || pp.hist || pp.anio)
+      ? entroDe(prefP, true) : 0;
     var salio = hayFiltro || !(mesF || esAnio)
       ? salioDe(prefP)
       : (mesF ? mesF.salio : ((fl.acumulado || {}).salio || 0));
     var neta = entro - salio;
-    var cob = !RS && !OBRA && salio > 0 ? 100 * entro / salio : null;
+    var cob = !RS && !OBRA && salio > 0 ? 100 * entroSinTraspasos / salio : null;
 
     /* LO FIRMADO, recortado por razón social / proyecto (filas del motor). */
     var hayRSObra = !!(RS || OBRA || TIPO);
@@ -480,8 +484,9 @@ window.HOJA = {
       'aria-expanded="false" tabindex="0" role="button">' +
       '<div class="d-cab"><span class="d-chip">↓</span>' +
       '<span class="d-preg">¿Cuánto entró?</span></div>' +
-      '<div class="d-cifra">' + solesM(entro) + '</div>' +
-      '<div class="d-exacta">' + soles(entro) + ' · del Registro de Movimientos</div>' +
+      '<div class="d-cifra">' + solesM(entroSinTraspasos) + '</div>' +
+      '<div class="d-exacta">' + soles(entroSinTraspasos) +
+      ' · del Registro de Movimientos, sin traspasos</div>' +
       '<div class="d-pie">' + (cob !== null
         ? '<span class="d-tag ' + (cob >= 100 ? 'ok' : 'mal') + '">' +
           cob.toFixed(1) + '%</span>de lo que salió' : '') + '</div></div>';

@@ -11,9 +11,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Habitat">
-<link rel="stylesheet" href="cockpit.css?v=1793979409">
-<script src="https://cdn.socket.io/4.7.2/socket.io.js"></script>
-<script src="/design/realtime.js"></script>
+<link rel="stylesheet" href="cockpit.css?v=1794668291">
 </head>
 <body>
 <div class="envoltorio">
@@ -24,7 +22,7 @@
            alt="Habitat Inmobiliaria">
       <div class="hoja-nombre" id="hoja-nombre">Cockpit</div>
       <div class="cabecera-der" id="cab-der"
-           data-version="sin versión">cargando…</div>
+           data-version="v10 · dcf1c3d · 2026-11-14">cargando…</div>
       <button class="btn-act" id="btn-act" title="Actualizar ahora" aria-label="Actualizar ahora">Actualizar ahora</button>
       <button class="btn-instalar" id="btn-instalar" type="button" title="Instalar la app" aria-label="Instalar la app" hidden>Instalar app</button>
       <a class="salir" id="salir" href="/salir" hidden>Salir</a>
@@ -148,16 +146,18 @@ window.REGISTRO = {};
       };
       var Fb0 = ((D.libro || {}).filas) || {};
       var noms0 = Fb0.cuenta || [], obrasLib0 = Fb0.obra || [];
+      var rxTraspasoIngreso = /se\s+(deposit[oó]|retir[oó])|retiro\s+de|traspaso/i;
       var esFilaSaldo = function (r) {
         return r[7] === "presupuesto" &&
           String(r[3] || "").trim().toUpperCase().indexOf("SALDO") === 0;
       };
-      var entroDe = function (pref) {
+      var entroDe = function (pref, sinTraspasos) {
         var s = 0;
         (Fb0.f || []).forEach(function (r) {
           if (pref && String(r[0] || "").indexOf(pref) !== 0) return;
           if (r[7] !== "venta" && r[7] !== "presupuesto") return;
           if (esFilaSaldo(r)) return;
+          if (sinTraspasos && rxTraspasoIngreso.test(String(r[3] || ""))) return;
           var cu = noms0[r[6]];
           if (!entraBanco(cu)) return;
           if (!self._entraRSCuenta(cu)) return;
@@ -197,11 +197,13 @@ window.REGISTRO = {};
 
       var entro = (esMes || esAnio || pp.hist || pp.anio)
         ? entroDe(prefP) : 0;
+      var entroSinTraspasos = (esMes || esAnio || pp.hist || pp.anio)
+        ? entroDe(prefP, true) : 0;
       var salio = hayFiltro || !(mesF || esAnio)
         ? salioDe(prefP)
         : (mesF ? mesF.salio : ((fl.acumulado || {}).salio || 0));
       var neta = entro - salio;
-      var cob = !RS && !OBRA && salio > 0 ? 100 * entro / salio : null;
+      var cob = !RS && !OBRA && salio > 0 ? 100 * entroSinTraspasos / salio : null;
 
       /* LO FIRMADO, recortado por razón social / proyecto (filas del motor). */
       var hayRSObra = !!(RS || OBRA || TIPO);
@@ -524,8 +526,9 @@ window.REGISTRO = {};
         'aria-expanded="false" tabindex="0" role="button">' +
         '<div class="d-cab"><span class="d-chip">↓</span>' +
         '<span class="d-preg">¿Cuánto entró?</span></div>' +
-        '<div class="d-cifra">' + solesM(entro) + '</div>' +
-        '<div class="d-exacta">' + soles(entro) + ' · del Registro de Movimientos</div>' +
+        '<div class="d-cifra">' + solesM(entroSinTraspasos) + '</div>' +
+        '<div class="d-exacta">' + soles(entroSinTraspasos) +
+        ' · del Registro de Movimientos, sin traspasos</div>' +
         '<div class="d-pie">' + (cob !== null
           ? '<span class="d-tag ' + (cob >= 100 ? 'ok' : 'mal') + '">' +
             cob.toFixed(1) + '%</span>de lo que salió' : '') + '</div></div>';
@@ -6309,7 +6312,7 @@ window.REGISTRO = {};
         h3 += '<tr class="total"><td class="obra">Promedio del mes</td><td class="num">' +
           soles(st.prom) + '</td></tr>';
         if (st.saldo) {
-          h3 += '<tr class="total"><td class="obra">Saldo real al cierre de ' + esc(st.saldo.nombre) +
+          h3 += '<tr class="total"><td class="obra">En cuentas al cierre de ' + esc(st.saldo.nombre) +
             '</td><td class="num">' + soles(st.saldo.real) + '</td></tr>';
         }
         return h3 + cierre;
@@ -15785,6 +15788,6 @@ window.REGISTRO = {};
 })();
 
 </script>
-<script src="cockpit.js?v=1793979409"></script>
+<script src="cockpit.js?v=1794668291"></script>
 </body>
 </html>
