@@ -128,12 +128,13 @@ window.HOJA = {
       return s;
     };
 
-    var salioDe = function (pref) {
+    var salioDe = function (pref, sinTraspasos) {
       var Fb = ((D.libro || {}).filas) || {};
       var noms = Fb.cuenta || [], obrasLib = Fb.obra || [], s = 0;
       (Fb.f || []).forEach(function (r) {
         if (pref && String(r[0] || "").indexOf(pref) !== 0) return;
         if (r[7] !== "gasto") return;
+        if (sinTraspasos && rxTraspasoIngreso.test(String(r[3] || ""))) return;
         var cu = noms[r[6]];
         if (!entraBanco(cu)) return;
         if (!self._entraRSCuenta(cu)) return;
@@ -720,11 +721,14 @@ window.HOJA = {
     }
     h += '</div>';
 
-    var entroMes = {}, salioMes = {}, maxBar = 1;
+    var entroMes = {}, salioMes = {}, entroSinTraspasosMes = {},
+        salioSinTraspasosMes = {}, maxBar = 1;
     vivos.forEach(function (m) {
       var pm = String(anioCaja) + "-" + (m.mes < 10 ? "0" : "") + m.mes;
       entroMes[m.mes] = entroDe(pm);
       salioMes[m.mes] = hayFiltro ? salioDe(pm) : (m.salio || 0);
+      entroSinTraspasosMes[m.mes] = entroDe(pm, true);
+      salioSinTraspasosMes[m.mes] = salioDe(pm, true);
       maxBar = Math.max(maxBar, entroMes[m.mes], salioMes[m.mes]);
     });
     var entro25 = {}, salio25 = {}, hay25 = false;
@@ -751,7 +755,7 @@ window.HOJA = {
       aniosSel.forEach(function (a) {
         for (var qs = 1; qs <= 12; qs++) {
           var ps = String(a) + "-" + (qs < 10 ? "0" : "") + qs;
-          var es_ = entroDe(ps), ss_ = salioDe(ps);
+          var es_ = entroDe(ps, true), ss_ = salioDe(ps, true);
           if (es_ > 0 || ss_ > 0)
             serieSel.filas.push({rot: MESLY[qs] + (pp.hist ? " " + a : ""), e: es_, s: ss_});
         }
@@ -793,6 +797,8 @@ window.HOJA = {
     this._corteN = corteN; this._cierreN = cierreN; this._hayContadora = hayContadora;
     this._historico = historico;
     this._entroMes = entroMes; this._salioMes = salioMes;
+    this._entroSinTraspasosMes = entroSinTraspasosMes;
+    this._salioSinTraspasosMes = salioSinTraspasosMes;
     this._hayFiltro = hayFiltro; this._CE = D.caja_encadenada || {};
     this._anioCaja = anioCaja; this._prefP = prefP; this._P2 = P2;
     this._neta = neta; this._entro = entro; this._salio = salio;
@@ -967,7 +973,8 @@ window.HOJA = {
     var filas = '', acum = arr, tE = 0, tS = 0;
     var ultReal = null, ultDif = null, ultMes = 0, ultCalc = null, esUltimo = false;
     (this._vivos || []).forEach(function (m) {
-      var e = self._entroMes[m.mes] || 0, s = self._salioMes[m.mes] || 0;
+      var e = self._entroSinTraspasosMes[m.mes] || 0;
+      var s = self._salioSinTraspasosMes[m.mes] || 0;
       var ini = acum;
       acum = ini + e - s; tE += e; tS += s;
       var r = reales[m.mes] || {};
@@ -1370,7 +1377,8 @@ window.HOJA = {
                          Number(CE.anio) === Number(anioN));
       if (!hayCadena) this._vNeta = "neto";
       var vN = this._vNeta || "neto";
-      var hN = t + '<h3>Caja neta, mes a mes · ' + esc(String(anioN)) + '</h3>';
+      var hN = t + '<h3>Caja neta, mes a mes · ' + esc(String(anioN)) + '</h3>' +
+        '<p class="d-sub">Ingresos y egresos sin traspasos entre cuentas.</p>';
       if (hayCadena) {
         hN += '<div class="pills-emp" id="pills-neta" style="margin:6px 0 2px">' +
           '<button class="pill-emp pill-vn' + (vN === "neto" ? ' activa' : '') +
@@ -1384,7 +1392,9 @@ window.HOJA = {
         '<th class="num">Neto</th></tr></thead><tbody>';
       var tE2 = 0, tS3 = 0;
       var filasN = SS ? SS.filas : this._vivos.map(function (m) {
-        return {rot: MESL[m.mes], e: self._entroMes[m.mes] || 0, s: self._salioMes[m.mes] || 0};
+        return {rot: MESL[m.mes],
+          e: self._entroSinTraspasosMes[m.mes] || 0,
+          s: self._salioSinTraspasosMes[m.mes] || 0};
       });
       filasN.forEach(function (f0) {
         var e = f0.e, s = f0.s;
