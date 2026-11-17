@@ -22,7 +22,7 @@
            alt="Habitat Inmobiliaria">
       <div class="hoja-nombre" id="hoja-nombre">Cockpit</div>
       <div class="cabecera-der" id="cab-der"
-           data-version="v11 · cd5acee · 2026-11-16">cargando…</div>
+           data-version="v12 · bef525d · 2026-11-16">cargando…</div>
       <button class="btn-act" id="btn-act" title="Actualizar ahora" aria-label="Actualizar ahora">Actualizar ahora</button>
       <button class="btn-instalar" id="btn-instalar" type="button" title="Instalar la app" aria-label="Instalar la app" hidden>Instalar app</button>
       <a class="salir" id="salir" href="/salir" hidden>Salir</a>
@@ -170,13 +170,12 @@ window.REGISTRO = {};
         return s;
       };
 
-      var salioDe = function (pref, sinTraspasos) {
+      var salioDe = function (pref) {
         var Fb = ((D.libro || {}).filas) || {};
         var noms = Fb.cuenta || [], obrasLib = Fb.obra || [], s = 0;
         (Fb.f || []).forEach(function (r) {
           if (pref && String(r[0] || "").indexOf(pref) !== 0) return;
           if (r[7] !== "gasto") return;
-          if (sinTraspasos && rxTraspasoIngreso.test(String(r[3] || ""))) return;
           var cu = noms[r[6]];
           if (!entraBanco(cu)) return;
           if (!self._entraRSCuenta(cu)) return;
@@ -763,14 +762,12 @@ window.REGISTRO = {};
       }
       h += '</div>';
 
-      var entroMes = {}, salioMes = {}, entroSinTraspasosMes = {},
-          salioSinTraspasosMes = {}, maxBar = 1;
+      var entroMes = {}, salioMes = {}, entroSinTraspasosMes = {}, maxBar = 1;
       vivos.forEach(function (m) {
         var pm = String(anioCaja) + "-" + (m.mes < 10 ? "0" : "") + m.mes;
         entroMes[m.mes] = entroDe(pm);
         salioMes[m.mes] = hayFiltro ? salioDe(pm) : (m.salio || 0);
         entroSinTraspasosMes[m.mes] = entroDe(pm, true);
-        salioSinTraspasosMes[m.mes] = salioDe(pm, true);
         maxBar = Math.max(maxBar, entroMes[m.mes], salioMes[m.mes]);
       });
       var entro25 = {}, salio25 = {}, hay25 = false;
@@ -797,7 +794,7 @@ window.REGISTRO = {};
         aniosSel.forEach(function (a) {
           for (var qs = 1; qs <= 12; qs++) {
             var ps = String(a) + "-" + (qs < 10 ? "0" : "") + qs;
-            var es_ = entroDe(ps, true), ss_ = salioDe(ps, true);
+            var es_ = entroDe(ps, true), ss_ = salioDe(ps);
             if (es_ > 0 || ss_ > 0)
               serieSel.filas.push({rot: MESLY[qs] + (pp.hist ? " " + a : ""), e: es_, s: ss_});
           }
@@ -840,7 +837,6 @@ window.REGISTRO = {};
       this._historico = historico;
       this._entroMes = entroMes; this._salioMes = salioMes;
       this._entroSinTraspasosMes = entroSinTraspasosMes;
-      this._salioSinTraspasosMes = salioSinTraspasosMes;
       this._hayFiltro = hayFiltro; this._CE = D.caja_encadenada || {};
       this._anioCaja = anioCaja; this._prefP = prefP; this._P2 = P2;
       this._neta = neta; this._entro = entro; this._salio = salio;
@@ -1016,7 +1012,7 @@ window.REGISTRO = {};
       var ultReal = null, ultDif = null, ultMes = 0, ultCalc = null, esUltimo = false;
       (this._vivos || []).forEach(function (m) {
         var e = self._entroSinTraspasosMes[m.mes] || 0;
-        var s = self._salioSinTraspasosMes[m.mes] || 0;
+        var s = self._salioMes[m.mes] || 0;
         var ini = acum;
         acum = ini + e - s; tE += e; tS += s;
         var r = reales[m.mes] || {};
@@ -1420,7 +1416,7 @@ window.REGISTRO = {};
         if (!hayCadena) this._vNeta = "neto";
         var vN = this._vNeta || "neto";
         var hN = t + '<h3>Caja neta, mes a mes · ' + esc(String(anioN)) + '</h3>' +
-          '<p class="d-sub">Ingresos y egresos sin traspasos entre cuentas.</p>';
+          '<p class="d-sub">Ingresos sin traspasos entre cuentas; los egresos no cambian.</p>';
         if (hayCadena) {
           hN += '<div class="pills-emp" id="pills-neta" style="margin:6px 0 2px">' +
             '<button class="pill-emp pill-vn' + (vN === "neto" ? ' activa' : '') +
@@ -1428,31 +1424,36 @@ window.REGISTRO = {};
             '<button class="pill-emp pill-vn' + (vN === "cadena" ? ' activa' : '') +
             '" data-vn="cadena" type="button">Saldo encadenado</button></div>';
         }
-        if (vN === "cadena") return hN + this._tablaCadena(CE, MESL);
-        hN += '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        var hMes = '<div data-vn-panel="neto"' +
+          (vN === "neto" ? '' : ' style="display:none"') +
+          '><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
           '<th>Mes</th><th class="num">Entró</th><th class="num">Salió</th>' +
           '<th class="num">Neto</th></tr></thead><tbody>';
         var tE2 = 0, tS3 = 0;
         var filasN = SS ? SS.filas : this._vivos.map(function (m) {
           return {rot: MESL[m.mes],
             e: self._entroSinTraspasosMes[m.mes] || 0,
-            s: self._salioSinTraspasosMes[m.mes] || 0};
+            s: self._salioMes[m.mes] || 0};
         });
         filasN.forEach(function (f0) {
           var e = f0.e, s = f0.s;
           tE2 += e; tS3 += s;
-          hN += '<tr><td class="obra">' + esc(f0.rot) + '</td>' +
+          hMes += '<tr><td class="obra">' + esc(f0.rot) + '</td>' +
             '<td class="num">' + soles(e) + '</td>' +
             '<td class="num">' + soles(s) + '</td>' +
             '<td class="num"' + (e - s < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
             soles(e - s) + '</td></tr>';
         });
-        hN += '<tr class="total"><td class="obra">TOTAL</td>' +
+        hMes += '<tr class="total"><td class="obra">TOTAL</td>' +
           '<td class="num">' + soles(tE2) + '</td>' +
           '<td class="num">' + soles(tS3) + '</td>' +
           '<td class="num"' + (tE2 - tS3 < 0 ? ' style="color:var(--rojo)"' : '') + '>' +
-          soles(tE2 - tS3) + '</td></tr>';
-        return hN + '</tbody></table></div>';
+          soles(tE2 - tS3) + '</td></tr></tbody></table></div></div>';
+        if (!hayCadena) return hN + hMes;
+        var hCadena = '<div data-vn-panel="cadena"' +
+          (vN === "cadena" ? '' : ' style="display:none"') + '>' +
+          this._tablaCadena(CE, MESL) + '</div>';
+        return hN + hMes + hCadena;
       }
 
       if (id === "d-cierre") {
@@ -1700,11 +1701,12 @@ window.REGISTRO = {};
           var v = b.getAttribute("data-vn");
           if (v === (self._vNeta || "neto")) return;
           self._vNeta = v;
-          var tarjeta = document.querySelector('[data-abre="d-neta"]');
-          if (!tarjeta || typeof alternar !== "function") return;
-          var y = window.scrollY || document.documentElement.scrollTop || 0;
-          alternar(tarjeta, "d-neta"); alternar(tarjeta, "d-neta");
-          window.scrollTo(0, y);
+          [].forEach.call(detN.querySelectorAll(".pill-vn"), function (x) {
+            x.classList.toggle("activa", x.getAttribute("data-vn") === v);
+          });
+          [].forEach.call(detN.querySelectorAll("[data-vn-panel]"), function (x) {
+            x.style.display = x.getAttribute("data-vn-panel") === v ? "" : "none";
+          });
         });
       }
       var pills = document.getElementById("pills-caja");
