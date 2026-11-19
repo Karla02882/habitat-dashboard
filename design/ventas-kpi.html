@@ -46,6 +46,14 @@ window.HOJA = {
     "% Lead → Venta": "◈"
   },
 
+  _asesoresConLeads: function (M) {
+    return (((M.crm || {}).kpis_asesor || {}).asesores || []).filter(function (a) {
+      var responsable = String(a.responsable || "").trim();
+      return responsable && responsable.toUpperCase() !== "(SIN RESPONSABLE)" &&
+        Number(a.leads) > 0;
+    });
+  },
+
   _meta: function (kpi, nAsesores) {
     var m = (this._MET || {})[kpi];
     if (!m) return null;
@@ -175,7 +183,7 @@ window.HOJA = {
     this._contratos = [].concat.apply([], ((M.estructura || {}).modalidad || [])
       .map(function (mo) { return mo.detalle || []; }));
 
-    var nAses = (D.asesores_activos || []).length;
+    var nAses = this._asesoresConLeads(M).length;
     this._nAses = nAses;
 
     var conMeta = 0, cumplen = 0, conDato = 0;
@@ -258,7 +266,7 @@ window.HOJA = {
     this._suyasN = suyas.map(function (x) { return String(x.asesor).toUpperCase(); });
     this._contratos = [].concat.apply([], ((M.estructura || {}).modalidad || [])
       .map(function (mo) { return mo.detalle || []; }));
-    var nAses = (D.asesores_activos || []).length;
+    var nAses = this._asesoresConLeads(M).length;
     this._nAses = nAses;
     var conMeta = 0, cumplen = 0, conDato = 0;
     kpis.forEach(function (k) {

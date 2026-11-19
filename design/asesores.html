@@ -51,6 +51,11 @@ window.HOJA = {
   pintar: function (M, D) {
     var self = this;
     var KA = ((M.crm || {}).kpis_asesor) || {};
+    var asesoresConLeads = (KA.asesores || []).filter(function (a) {
+      var responsable = String(a.responsable || "").trim();
+      return responsable && responsable.toUpperCase() !== "(SIN RESPONSABLE)" &&
+        Number(a.leads) > 0;
+    });
     var MET = D.metas_asesor || {};
     var leadsMarketing = (KA.asesores || []).reduce(function (total, a) {
       return total + (Number(a.leads) || 0);
@@ -82,7 +87,7 @@ window.HOJA = {
       });
     });
     var deCRM = {};
-    (KA.asesores || []).forEach(function (a) {
+    asesoresConLeads.forEach(function (a) {
       deCRM[a.responsable] = {t: toks(a.responsable), leads: a.leads || 0};
     });
     var asignado = {}, usados = {}, dobles = [];
@@ -108,7 +113,7 @@ window.HOJA = {
       if (empatan.length > 1) dobles.push(empatan.join(' = '));
     });
 
-    var filas = (KA.asesores || []).map(function (a) {
+    var filas = asesoresConLeads.map(function (a) {
       var p = asignado[a.responsable] || null;
       return {a: a, monto: p ? p.s : 0, ventasAx: p ? p.n : 0,
               vlist: p ? p.v : [],
@@ -124,9 +129,12 @@ window.HOJA = {
       return comun >= 2 && (wb.indexOf(wa[0]) >= 0 || wa.indexOf(wb[0]) >= 0)
         ? comun : 0;
     };
-    var activos = (D.asesores_activos || []).map(function (x) {
-      return String(x || "").trim();
-    }).filter(function (x) { return !!x; });
+    var asesoresVisibles = asesoresConLeads.filter(function (a) {
+      return !ASESOR || matchAsesor(a.responsable, ASESOR) > 0;
+    });
+    var activos = asesoresVisibles.map(function (a) {
+      return String(a.responsable || "").trim();
+    });
     var ventasActivas = {};
     activos.forEach(function (nombre) {
       ventasActivas[nombre] = [];
@@ -292,37 +300,43 @@ window.HOJA = {
 
 
     var _rankAx = function (titulo, sub, valor, texto) {
-      var vivos = (AX.asesores || []).filter(function (x) {
-        return valor(x) !== null && valor(x) !== undefined; });
-      vivos.sort(function (a, b) { return valor(b) - valor(a); });
+      var vivos = asesoresComercial.slice().sort(function (a, b) {
+        return (Number(valor(b)) || 0) - (Number(valor(a)) || 0);
+      });
       var h2 = '<div class="tarjeta" style="padding:var(--e4) var(--e2)">' +
         '<span class="overline" style="padding:0 var(--e2)">' + esc(titulo) + '</span>' +
         '<p class="d-sub" style="padding:0 var(--e2);margin:2px 0 0">' + esc(sub) + '</p>';
       if (!vivos.length) {
         return h2 + '<div class="hueco-kpi"><b>NO HAY DATOS</b>' +
-          '<span>(nadie lo tiene cargado en AXION)</span>' +
+          '<span>(ningún asesor recibió leads en Kommo en este período)</span>' +
           '<span class="ob-sub">Comercial</span></div></div>';
       }
       h2 += '<div class="envoltura-tabla"><table class="datos"><tbody>';
       vivos.slice(0, 8).forEach(function (x) {
         h2 += '<tr><td class="obra">' + esc(x.asesor) + '</td>' +
-          '<td class="num">' + texto(x) + '</td></tr>';
+          '<td class="num">' + (valor(x) === null || valor(x) === undefined
+            ? 'Sin dato' : texto(x)) + '</td></tr>';
       });
       if (vivos.length > 8) {
         h2 += filaOtros('… ' + ent(vivos.length - 8) + ' asesores más', '<td class="num"></td>',
           vivos.slice(8).map(function (x) {
             return '<td class="obra">' + esc(x.asesor) + '</td>' +
-              '<td class="num">' + texto(x) + '</td>'; }));
+              '<td class="num">' + (valor(x) === null || valor(x) === undefined
+                ? 'Sin dato' : texto(x)) + '</td>'; }));
       }
       h2 += '</tbody></table></div>';
-      if (AX.con_carga < AX.total) {
+      var conCarga = vivos.filter(function (x) {
+        return x.agendas !== null && x.agendas !== undefined;
+      }).length;
+      if (conCarga < vivos.length) {
         h2 += '<p class="d-sub" style="padding:0 var(--e2)">' +
-          ent(AX.total - AX.con_carga) + ' sin cargar · Comercial</p>';
+          ent(vivos.length - conCarga) +
+          ' sin cargar en AXION · asesores que reciben leads en Kommo</p>';
       }
       return h2 + '</div>';
     };
     var _rankPropios = function () {
-      var vivos = (AX.asesores || []).slice().sort(function (a, b) {
+      var vivos = asesoresComercial.slice().sort(function (a, b) {
         return (Number(b.leads_propios) || 0) - (Number(a.leads_propios) || 0);
       });
       var max = Math.max(1, metaLeadsPropios);
@@ -338,7 +352,7 @@ window.HOJA = {
         '<p class="d-sub" style="padding:0 var(--e2);margin:2px 0 0">' + esc(sub) + '</p>';
       if (!vivos.length) {
         return h2 + '<div class="hueco-kpi"><b>NO HAY DATOS</b>' +
-          '<span>(ningún asesor tiene leads propios cargados en AXION)</span>' +
+          '<span>(ningún asesor recibió leads en Kommo en este período)</span>' +
           '<span class="ob-sub">Comercial</span></div></div>';
       }
       h2 += '<table class="grafico-pb"><tbody>';
@@ -378,22 +392,35 @@ window.HOJA = {
 
     var VK = (window.REGISTRO || {})["ventas-kpi"];
     var AX = M.asesores_axion || {};
+    var asesoresComercial = asesoresVisibles.map(function (a) {
+      var candidatos = (AX.asesores || []).map(function (x) {
+        return {asesor: x, score: matchAsesor(a.responsable, x.asesor)};
+      }).filter(function (x) { return x.score > 0; })
+        .sort(function (x, y) { return y.score - x.score; });
+      var ax = candidatos.length &&
+        !(candidatos.length > 1 && candidatos[0].score === candidatos[1].score)
+        ? candidatos[0].asesor : null;
+      return {
+        asesor: a.responsable,
+        leads: Number(a.leads) || 0,
+        agendas: ax ? ax.agendas : null,
+        visitas: ax ? ax.visitas : null,
+        pct_visitas: ax ? ax.pct_visitas : null,
+        leads_propios: ax ? ax.leads_propios : null
+      };
+    });
     var kpiPropios = null;
     if (leadsMarketing > 0) {
       if (ASESOR) {
-        var propiosSeleccionado = (AX.asesores || []).filter(function (x) {
-          return VK && VK._mismo
-            ? VK._mismo(x.asesor, ASESOR)
-            : norm(x.asesor) === norm(ASESOR);
+        var propiosSeleccionado = asesoresComercial.filter(function (x) {
+          return matchAsesor(x.asesor, ASESOR) > 0;
         }).filter(function (x) {
           return x.leads_propios !== null && x.leads_propios !== undefined;
         }).reduce(function (total, x) {
           return total + (Number(x.leads_propios) || 0);
         }, 0);
-        var hayPropiosSeleccionado = (AX.asesores || []).some(function (x) {
-          return (VK && VK._mismo
-            ? VK._mismo(x.asesor, ASESOR)
-            : norm(x.asesor) === norm(ASESOR)) &&
+        var hayPropiosSeleccionado = asesoresComercial.some(function (x) {
+          return matchAsesor(x.asesor, ASESOR) > 0 &&
             x.leads_propios !== null && x.leads_propios !== undefined;
         });
         kpiPropios = {
@@ -407,23 +434,27 @@ window.HOJA = {
             : ''
         };
       } else {
-        var propiosConDato = (AX.asesores || []).filter(function (x) {
+        var propiosConDato = asesoresComercial.filter(function (x) {
           return x.leads_propios !== null && x.leads_propios !== undefined;
         });
-        var propiosCumplen = propiosConDato.filter(function (x) {
-          return Number(x.leads_propios) >= metaLeadsPropios;
+        var propiosCumplen = asesoresComercial.filter(function (x) {
+          return x.leads_propios !== null && x.leads_propios !== undefined &&
+            Number(x.leads_propios) >= metaLeadsPropios;
         }).length;
         kpiPropios = {
-          valor: propiosConDato.length
-            ? ent(propiosCumplen) + ' / ' + ent(propiosConDato.length)
+          valor: asesoresComercial.length
+            ? ent(propiosCumplen) + ' / ' + ent(asesoresComercial.length)
             : null,
-          meta: (propiosConDato.length
-            ? 'asesores con dato que cumplen'
-            : 'sin datos de leads propios en AXION') +
+          meta: (asesoresComercial.length
+            ? 'asesores que reciben leads en Kommo cumplen' +
+              (propiosConDato.length < asesoresComercial.length
+                ? ' · ' + ent(asesoresComercial.length - propiosConDato.length) +
+                  ' sin dato en AXION' : '')
+            : 'ningún asesor recibe leads en Kommo en este período') +
             ' · meta ' + ent(metaLeadsPropios) + ' leads por asesor (10% de ' +
             ent(leadsMarketing) + ' de Marketing)',
-          sem: propiosConDato.length
-            ? (propiosCumplen === propiosConDato.length ? 'ok' : 'mal')
+          sem: asesoresComercial.length
+            ? (propiosCumplen === asesoresComercial.length ? 'ok' : 'mal')
             : ''
         };
       }
@@ -510,7 +541,7 @@ window.HOJA = {
     this._ventasSinCruce = ventasSinCruce;
     this._leadsMarketing = leadsMarketing;
     this._metaLeadsPropios = metaLeadsPropios;
-    this._asesoresPropios = AX.asesores || [];
+    this._asesoresPropios = asesoresComercial;
 
     var totAx = 0, totCRM = 0;
     filas.forEach(function (f) { totAx += f.ventasAx; totCRM += f.a.ventas; });
@@ -585,7 +616,7 @@ window.HOJA = {
         '<p class="d-sub">Meta por asesor: 10% de ' + ent(asignados) +
         ' leads asignados por Marketing = ' +
         (asignados ? ent(metaPropios) + ' leads' : 'no disponible') +
-        ' · dato de AXION.</p>' +
+        ' · dato de AXION · solo asesores con leads asignados en Kommo.</p>' +
         '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
         '<th>Asesor</th><th class="num">Leads propios</th>' +
         '<th class="num">Meta</th><th class="num">Cumplimiento</th>' +
@@ -614,11 +645,12 @@ window.HOJA = {
       detallePropios += '<tr class="total"><td class="obra">TOTAL</td>' +
         '<td class="num">' + (conDatoPropios ? ent(sumaPropios) : '—') + '</td>' +
         '<td class="num">' + (asignados
-        ? ent(metaPropios * conDatoPropios) : '—') + '</td>' +
-      '<td class="num">' + (asignados && conDatoPropios
-        ? fmt1(100 * cumplenPropios / conDatoPropios) + '% con dato cumplen'
+        ? ent(metaPropios * propiosAsesores.length) : '—') + '</td>' +
+      '<td class="num">' + (asignados && propiosAsesores.length
+        ? fmt1(100 * cumplenPropios / propiosAsesores.length) + '% activos cumplen'
           : '—') + '</td><td>' + ent(cumplenPropios) + ' de ' +
-      ent(conDatoPropios) + ' con dato</td></tr>';
+      ent(propiosAsesores.length) + ' activos · ' +
+      ent(propiosAsesores.length - conDatoPropios) + ' sin dato</td></tr>';
       return detallePropios + '</tbody></table></div>';
     }
     if (id === "as-seg") {
