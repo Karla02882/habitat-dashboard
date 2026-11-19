@@ -364,6 +364,7 @@ window.HOJA = {
       };
     }
     kpiPropios.nombre = 'Generación de Leads Propios';
+    kpiPropios.id = 'as-propios';
     if (VK && VK._diezHtml) h += VK._diezHtml(M, D, kpiPropios);
 
     h += '<div class="rejilla-3" style="margin-bottom:var(--e4)">' +
@@ -430,6 +431,9 @@ window.HOJA = {
       });
     });
     this._filas = filas;
+    this._leadsMarketing = leadsMarketing;
+    this._metaLeadsPropios = metaLeadsPropios;
+    this._asesoresPropios = AX.asesores || [];
 
     var totAx = 0, totCRM = 0;
     filas.forEach(function (f) { totAx += f.ventasAx; totCRM += f.a.ventas; });
@@ -449,6 +453,51 @@ window.HOJA = {
     }
     if (String(id).indexOf("as-") !== 0) return null;
     var NE = "No existe";
+    if (id === "as-propios") {
+      var asignados = this._leadsMarketing || 0;
+      var metaPropios = this._metaLeadsPropios || 0;
+      var propiosAsesores = this._asesoresPropios || [];
+      var detallePropios = '<button class="cerrar">Cerrar</button>' +
+        '<h3>Generación de Leads Propios · por asesor</h3>' +
+        '<p class="d-sub">Meta por asesor: 10% de ' + ent(asignados) +
+        ' leads asignados por Marketing = ' +
+        (asignados ? ent(metaPropios) + ' leads' : 'no disponible') +
+        ' · dato de AXION.</p>' +
+        '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Asesor</th><th class="num">Leads propios</th>' +
+        '<th class="num">Meta</th><th class="num">Cumplimiento</th>' +
+        '<th>Estado</th></tr></thead><tbody>';
+      var sumaPropios = 0, conDatoPropios = 0, cumplenPropios = 0;
+      propiosAsesores.forEach(function (x) {
+        var conocido = x.leads_propios !== null && x.leads_propios !== undefined;
+        var propios = Number(x.leads_propios) || 0;
+        var pct = asignados && conocido
+          ? 100 * propios / metaPropios : null;
+        if (conocido) {
+          sumaPropios += propios;
+          conDatoPropios++;
+          if (pct !== null && propios >= metaPropios) cumplenPropios++;
+        }
+        detallePropios += '<tr><td class="obra">' + esc(x.asesor) + '</td>' +
+          '<td class="num">' + (conocido ? ent(propios) : 'Sin dato') + '</td>' +
+          '<td class="num">' + (asignados ? ent(metaPropios) : '—') + '</td>' +
+          '<td class="num">' + (pct === null ? '—' : fmt1(pct) + '%') + '</td>' +
+          '<td>' + (pct === null
+            ? '<span class="d-tag espera">Sin dato</span>'
+            : (propios >= metaPropios
+              ? '<span class="d-tag ok">Cumple</span>'
+              : '<span class="d-tag mal">No llega</span>')) + '</td></tr>';
+      });
+      detallePropios += '<tr class="total"><td class="obra">TOTAL</td>' +
+        '<td class="num">' + (conDatoPropios ? ent(sumaPropios) : '—') + '</td>' +
+        '<td class="num">' + (asignados
+        ? ent(metaPropios * conDatoPropios) : '—') + '</td>' +
+      '<td class="num">' + (asignados && conDatoPropios
+        ? fmt1(100 * cumplenPropios / conDatoPropios) + '% con dato cumplen'
+          : '—') + '</td><td>' + ent(cumplenPropios) + ' de ' +
+      ent(conDatoPropios) + ' con dato</td></tr>';
+      return detallePropios + '</tbody></table></div>';
+    }
     if (id === "as-seg") {
       var FS = (this._filas || []).filter(function (f) { return f.a.seg_dist; });
       var prom = function (d, c) { return c ? (d[1] + 2 * d[2] + 3 * d[3]) / c : null; };

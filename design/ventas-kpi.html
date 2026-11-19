@@ -300,7 +300,10 @@ window.HOJA = {
     });
     if (extra) {
       h += '<div class="kpi-m' + (extra.valor === null ? ' vacia' : '') +
-        (extra.sem ? ' sem-' + extra.sem : '') + '">' +
+        (extra.sem ? ' sem-' + extra.sem : '') +
+        (extra.id ? ' abrible' : '') + '"' +
+        (extra.id ? ' data-abre="' + esc(extra.id) +
+          '" aria-expanded="false" tabindex="0" role="button"' : '') + '>' +
         '<span class="kpi-m-chip">◎</span>' +
         '<span class="kpi-m-nom">' + esc(extra.nombre) + '</span>' +
         '<span class="kpi-m-val">' +
@@ -311,6 +314,8 @@ window.HOJA = {
     kpis.forEach(function (k) {
       h += '<div class="detalle" id="det-kv-' + self._id(k.kpi) + '"></div>';
     });
+    if (extra && extra.id)
+      h += '<div class="detalle" id="det-' + esc(extra.id) + '"></div>';
     return h;
   },
 
