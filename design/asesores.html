@@ -53,7 +53,13 @@ window.HOJA = {
     var KA = ((M.crm || {}).kpis_asesor) || {};
     var asesoresConLeads = (KA.asesores || []).filter(function (a) {
       var responsable = String(a.responsable || "").trim();
-      return responsable && responsable.toUpperCase() !== "(SIN RESPONSABLE)" &&
+      var clave = responsable.toUpperCase()
+        .replace(/[ÁÀÄÂ]/g, "A").replace(/[ÉÈËÊ]/g, "E")
+        .replace(/[ÍÌÏÎ]/g, "I").replace(/[ÓÒÖÔ]/g, "O")
+        .replace(/[ÚÙÜÛ]/g, "U").replace(/Ñ/g, "N")
+        .replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+      return responsable && clave !== "SIN RESPONSABLE" &&
+        clave.indexOf("HABITAT BIENES RAICES") < 0 &&
         Number(a.leads) > 0;
     });
     var MET = D.metas_asesor || {};
