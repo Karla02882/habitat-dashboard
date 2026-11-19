@@ -22,7 +22,7 @@
            alt="Habitat Inmobiliaria">
       <div class="hoja-nombre" id="hoja-nombre">Cockpit</div>
       <div class="cabecera-der" id="cab-der"
-           data-version="v17 · 4088cf0 · 2026-11-19">cargando…</div>
+           data-version="v18 · 7e99f54 · 2026-11-19">cargando…</div>
       <button class="btn-act" id="btn-act" title="Actualizar ahora" aria-label="Actualizar ahora">Actualizar ahora</button>
       <button class="btn-instalar" id="btn-instalar" type="button" title="Instalar la app" aria-label="Instalar la app" hidden>Instalar app</button>
       <a class="salir" id="salir" href="/salir" hidden>Salir</a>
@@ -7506,6 +7506,13 @@ window.REGISTRO = {};
         return total + (Number(a.leads) || 0);
       }, 0);
       var metaLeadsPropios = Math.ceil(leadsMarketing * 0.1);
+      var nAsesoresKommo = asesoresConLeads.length;
+      var metaPropiosPorAsesor = nAsesoresKommo
+        ? metaLeadsPropios / nAsesoresKommo : 0;
+      var textoMetaPropios = function (valor) {
+        return Math.abs(valor - Math.round(valor)) < 0.0001
+          ? ent(valor) : fmt1(valor);
+      };
       if (!KA.hay || !(KA.asesores || []).length) {
         return '<div class="d-lienzo"><div class="d-carta">' +
           '<div class="d-cifra">—</div>' +
@@ -7784,13 +7791,14 @@ window.REGISTRO = {};
         var vivos = asesoresComercial.slice().sort(function (a, b) {
           return (Number(b.leads_propios) || 0) - (Number(a.leads_propios) || 0);
         });
-        var max = Math.max(1, metaLeadsPropios);
+        var max = Math.max(1, metaPropiosPorAsesor);
         vivos.forEach(function (x) {
           max = Math.max(max, Number(x.leads_propios) || 0);
         });
         var sub = leadsMarketing > 0
-          ? 'meta ' + ent(metaLeadsPropios) + ' leads por asesor · 10% de ' +
-            ent(leadsMarketing) + ' leads asignados por Marketing · AXION'
+          ? 'meta global ' + ent(metaLeadsPropios) + ' leads · 10% de ' +
+            ent(leadsMarketing) + ' de Marketing · dividido entre ' +
+            ent(nAsesoresKommo) + ' asesores con leads en Kommo · AXION'
           : 'sin leads asignados por Marketing para calcular la meta del período';
         var h2 = '<div class="tarjeta" style="padding:var(--e4) var(--e2)">' +
           '<span class="overline" style="padding:0 var(--e2)">Generación de Leads Propios</span>' +
@@ -7804,9 +7812,10 @@ window.REGISTRO = {};
         vivos.forEach(function (x) {
           var conocido = x.leads_propios !== null && x.leads_propios !== undefined;
           var propios = Number(x.leads_propios) || 0;
-          var cumple = leadsMarketing > 0 && conocido && propios >= metaLeadsPropios;
+          var cumple = metaPropiosPorAsesor > 0 && conocido &&
+            propios >= metaPropiosPorAsesor;
           var pct = leadsMarketing > 0 && conocido
-            ? fmt1(100 * propios / metaLeadsPropios) + '%'
+            ? fmt1(100 * propios / metaPropiosPorAsesor) + '%'
             : '—';
           var barra = conocido
             ? '<span class="' + (cumple ? 'b-ok' : 'b-mal') +
@@ -7818,7 +7827,8 @@ window.REGISTRO = {};
             '<td class="pb-barra">' + barra + '</td>' +
             '<td class="pb-cif">' + (conocido ? ent(propios) : 'Sin dato') +
             '<span class="ob-sub">' + (leadsMarketing > 0
-              ? 'meta ' + ent(metaLeadsPropios) + ' · ' + pct + ' de cumplimiento'
+              ? 'meta ' + textoMetaPropios(metaPropiosPorAsesor) + ' · ' +
+                pct + ' de cumplimiento'
               : 'meta no disponible') + '</span></td></tr>';
         });
         return h2 + '</tbody></table></div>';
@@ -7869,13 +7879,14 @@ window.REGISTRO = {};
               x.leads_propios !== null && x.leads_propios !== undefined;
           });
           kpiPropios = {
-            valor: hayPropiosSeleccionado
-              ? fmt1(100 * propiosSeleccionado / metaLeadsPropios) + '%'
+            valor: hayPropiosSeleccionado && metaPropiosPorAsesor > 0
+              ? fmt1(100 * propiosSeleccionado / metaPropiosPorAsesor) + '%'
               : null,
-            meta: 'cumplimiento · meta ' + ent(metaLeadsPropios) +
-              ' leads por asesor (10% de ' + ent(leadsMarketing) + ' de Marketing)',
+            meta: 'meta individual ' + textoMetaPropios(metaPropiosPorAsesor) +
+              ' leads · parte de la meta global de ' + ent(metaLeadsPropios) +
+              ' dividida entre ' + ent(nAsesoresKommo) + ' asesores con leads en Kommo',
             sem: hayPropiosSeleccionado
-              ? (propiosSeleccionado >= metaLeadsPropios ? 'ok' : 'mal')
+              ? (propiosSeleccionado >= metaPropiosPorAsesor ? 'ok' : 'mal')
               : ''
           };
         } else {
@@ -7884,22 +7895,30 @@ window.REGISTRO = {};
           });
           var propiosCumplen = asesoresComercial.filter(function (x) {
             return x.leads_propios !== null && x.leads_propios !== undefined &&
-              Number(x.leads_propios) >= metaLeadsPropios;
+              Number(x.leads_propios) >= metaPropiosPorAsesor;
           }).length;
+          var sumaPropios = propiosConDato.reduce(function (total, x) {
+            return total + (Number(x.leads_propios) || 0);
+          }, 0);
           kpiPropios = {
-            valor: asesoresComercial.length
-              ? ent(propiosCumplen) + ' / ' + ent(asesoresComercial.length)
+            valor: propiosConDato.length
+              ? ent(sumaPropios) + ' / ' + ent(metaLeadsPropios)
               : null,
             meta: (asesoresComercial.length
-              ? 'asesores que reciben leads en Kommo cumplen' +
+              ? 'meta global · ' + ent(propiosCumplen) + ' de ' +
+                ent(asesoresComercial.length) + ' asesores alcanzan su cuota individual' +
                 (propiosConDato.length < asesoresComercial.length
                   ? ' · ' + ent(asesoresComercial.length - propiosConDato.length) +
                     ' sin dato en AXION' : '')
               : 'ningún asesor recibe leads en Kommo en este período') +
-              ' · meta ' + ent(metaLeadsPropios) + ' leads por asesor (10% de ' +
-              ent(leadsMarketing) + ' de Marketing)',
+              ' · ' + ent(metaLeadsPropios) + ' leads totales (10% de ' +
+              ent(leadsMarketing) + ' de Marketing), repartidos entre ' +
+              ent(nAsesoresKommo) + ' asesores (' +
+              textoMetaPropios(metaPropiosPorAsesor) + ' por asesor)',
             sem: asesoresComercial.length
-              ? (propiosCumplen === asesoresComercial.length ? 'ok' : 'mal')
+              ? (sumaPropios >= metaLeadsPropios
+                ? 'ok'
+                : (propiosConDato.length === asesoresComercial.length ? 'mal' : ''))
               : ''
           };
         }
@@ -7986,6 +8005,8 @@ window.REGISTRO = {};
       this._ventasSinCruce = ventasSinCruce;
       this._leadsMarketing = leadsMarketing;
       this._metaLeadsPropios = metaLeadsPropios;
+      this._metaLeadsPropiosPorAsesor = metaPropiosPorAsesor;
+      this._nAsesoresKommo = nAsesoresKommo;
       this._asesoresPropios = asesoresComercial;
 
       var totAx = 0, totCRM = 0;
@@ -8055,12 +8076,21 @@ window.REGISTRO = {};
       if (id === "as-propios") {
         var asignados = this._leadsMarketing || 0;
         var metaPropios = this._metaLeadsPropios || 0;
+        var metaPorAsesor = this._metaLeadsPropiosPorAsesor || 0;
+        var metaTotalPropios = ASESOR ? metaPorAsesor : metaPropios;
+        var textoMetaDetalle = function (valor) {
+          return Math.abs(valor - Math.round(valor)) < 0.0001
+            ? ent(valor) : fmt1(valor);
+        };
         var propiosAsesores = this._asesoresPropios || [];
         var detallePropios = '<button class="cerrar">Cerrar</button>' +
           '<h3>Generación de Leads Propios · por asesor</h3>' +
-          '<p class="d-sub">Meta por asesor: 10% de ' + ent(asignados) +
+          '<p class="d-sub">Meta global: 10% de ' + ent(asignados) +
           ' leads asignados por Marketing = ' +
           (asignados ? ent(metaPropios) + ' leads' : 'no disponible') +
+          ' · dividida entre ' + ent(this._nAsesoresKommo || 0) +
+          ' asesores con leads en Kommo = ' + textoMetaDetalle(metaPorAsesor) +
+          ' por asesor' +
           ' · dato de AXION · solo asesores con leads asignados en Kommo.</p>' +
           '<div class="envoltura-tabla"><table class="datos"><thead><tr>' +
           '<th>Asesor</th><th class="num">Leads propios</th>' +
@@ -8070,31 +8100,33 @@ window.REGISTRO = {};
         propiosAsesores.forEach(function (x) {
           var conocido = x.leads_propios !== null && x.leads_propios !== undefined;
           var propios = Number(x.leads_propios) || 0;
-          var pct = asignados && conocido
-            ? 100 * propios / metaPropios : null;
+          var pct = metaPorAsesor > 0 && conocido
+            ? 100 * propios / metaPorAsesor : null;
           if (conocido) {
             sumaPropios += propios;
             conDatoPropios++;
-            if (pct !== null && propios >= metaPropios) cumplenPropios++;
+            if (pct !== null && propios >= metaPorAsesor) cumplenPropios++;
           }
           detallePropios += '<tr><td class="obra">' + esc(x.asesor) + '</td>' +
             '<td class="num">' + (conocido ? ent(propios) : 'Sin dato') + '</td>' +
-            '<td class="num">' + (asignados ? ent(metaPropios) : '—') + '</td>' +
+            '<td class="num">' + (metaPorAsesor
+              ? textoMetaDetalle(metaPorAsesor) : '—') + '</td>' +
             '<td class="num">' + (pct === null ? '—' : fmt1(pct) + '%') + '</td>' +
             '<td>' + (pct === null
               ? '<span class="d-tag espera">Sin dato</span>'
-              : (propios >= metaPropios
+              : (propios >= metaPorAsesor
                 ? '<span class="d-tag ok">Cumple</span>'
                 : '<span class="d-tag mal">No llega</span>')) + '</td></tr>';
         });
-        detallePropios += '<tr class="total"><td class="obra">TOTAL</td>' +
+        detallePropios += '<tr class="total"><td class="obra">' +
+          (ASESOR ? 'TOTAL · ' + esc(ASESOR) : 'TOTAL · EQUIPO') + '</td>' +
           '<td class="num">' + (conDatoPropios ? ent(sumaPropios) : '—') + '</td>' +
-          '<td class="num">' + (asignados
-          ? ent(metaPropios * propiosAsesores.length) : '—') + '</td>' +
-        '<td class="num">' + (asignados && propiosAsesores.length
-          ? fmt1(100 * cumplenPropios / propiosAsesores.length) + '% activos cumplen'
+          '<td class="num">' + (metaTotalPropios
+          ? textoMetaDetalle(metaTotalPropios) : '—') + '</td>' +
+        '<td class="num">' + (metaTotalPropios && conDatoPropios
+          ? fmt1(100 * sumaPropios / metaTotalPropios) + '% de la meta'
             : '—') + '</td><td>' + ent(cumplenPropios) + ' de ' +
-        ent(propiosAsesores.length) + ' activos · ' +
+        ent(propiosAsesores.length) + ' cumplen su cuota · ' +
         ent(propiosAsesores.length - conDatoPropios) + ' sin dato</td></tr>';
         return detallePropios + '</tbody></table></div>';
       }
