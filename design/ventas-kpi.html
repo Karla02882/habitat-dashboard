@@ -231,7 +231,7 @@ window.HOJA = {
     return h;
   },
 
-  _diezHtml: function (M, D) {
+  _diezHtml: function (M, D, extra) {
     var self = this;
     var KV = ((M.crm || {}).kpis_ventas) || {};
     if (!KV.hay || !(KV.kpis || []).length) return "";
@@ -271,9 +271,13 @@ window.HOJA = {
       }
     });
     var h = "";
-    h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">Los diez indicadores</h3>' +
-      '<p class="d-sub">' + ent(conDato) + ' con fuente' +
-      ' · ' + ent(cumplen) + ' de ' + ent(conMeta) + ' en meta' +
+    h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">' +
+      (extra ? 'Indicadores comerciales' : 'Los diez indicadores') + '</h3>' +
+      '<p class="d-sub">' + (extra
+        ? ent(conDato) + ' de ' + ent(kpis.length) + ' KPI de ventas con fuente'
+        : ent(conDato) + ' con fuente') +
+      ' · ' + ent(cumplen) + ' de ' + ent(conMeta) +
+      (extra ? ' metas de ventas' : ' en meta') +
       (ASESOR ? '' : ' · metas de conteo × ' + ent(nAses) + ' asesores') +
       (!ASESOR && fuera.ventas
         ? ' · ' + ent(fuera.ventas) + ' ventas de AXION sin usuario del CRM'
@@ -294,6 +298,15 @@ window.HOJA = {
              (m.equipo ? ' <i>(' + esc(m.equipo) + ')</i>' : '') +
              '</span>' : '') + '</div>';
     });
+    if (extra) {
+      h += '<div class="kpi-m' + (extra.valor === null ? ' vacia' : '') +
+        (extra.sem ? ' sem-' + extra.sem : '') + '">' +
+        '<span class="kpi-m-chip">◎</span>' +
+        '<span class="kpi-m-nom">' + esc(extra.nombre) + '</span>' +
+        '<span class="kpi-m-val">' +
+        (extra.valor === null ? 'sin dato' : esc(extra.valor)) + '</span>' +
+        '<span class="kpi-m-meta">' + esc(extra.meta) + '</span></div>';
+    }
     h += '</div></div>';
     kpis.forEach(function (k) {
       h += '<div class="detalle" id="det-kv-' + self._id(k.kpi) + '"></div>';

@@ -22,7 +22,7 @@
            alt="Habitat Inmobiliaria">
       <div class="hoja-nombre" id="hoja-nombre">Cockpit</div>
       <div class="cabecera-der" id="cab-der"
-           data-version="v12 · bef525d · 2026-11-16">cargando…</div>
+           data-version="v13 · 5b6c44c · 2026-11-16">cargando…</div>
       <button class="btn-act" id="btn-act" title="Actualizar ahora" aria-label="Actualizar ahora">Actualizar ahora</button>
       <button class="btn-instalar" id="btn-instalar" type="button" title="Instalar la app" aria-label="Instalar la app" hidden>Instalar app</button>
       <a class="salir" id="salir" href="/salir" hidden>Salir</a>
@@ -7040,7 +7040,7 @@ window.REGISTRO = {};
       return h;
     },
 
-    _diezHtml: function (M, D) {
+    _diezHtml: function (M, D, extra) {
       var self = this;
       var KV = ((M.crm || {}).kpis_ventas) || {};
       if (!KV.hay || !(KV.kpis || []).length) return "";
@@ -7080,9 +7080,13 @@ window.REGISTRO = {};
         }
       });
       var h = "";
-      h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">Los diez indicadores</h3>' +
-        '<p class="d-sub">' + ent(conDato) + ' con fuente' +
-        ' · ' + ent(cumplen) + ' de ' + ent(conMeta) + ' en meta' +
+      h += '<div class="d-carta" style="margin-bottom:var(--e4)"><h3 class="d-tit">' +
+        (extra ? 'Indicadores comerciales' : 'Los diez indicadores') + '</h3>' +
+        '<p class="d-sub">' + (extra
+          ? ent(conDato) + ' de ' + ent(kpis.length) + ' KPI de ventas con fuente'
+          : ent(conDato) + ' con fuente') +
+        ' · ' + ent(cumplen) + ' de ' + ent(conMeta) +
+        (extra ? ' metas de ventas' : ' en meta') +
         (ASESOR ? '' : ' · metas de conteo × ' + ent(nAses) + ' asesores') +
         (!ASESOR && fuera.ventas
           ? ' · ' + ent(fuera.ventas) + ' ventas de AXION sin usuario del CRM'
@@ -7103,6 +7107,15 @@ window.REGISTRO = {};
                (m.equipo ? ' <i>(' + esc(m.equipo) + ')</i>' : '') +
                '</span>' : '') + '</div>';
       });
+      if (extra) {
+        h += '<div class="kpi-m' + (extra.valor === null ? ' vacia' : '') +
+          (extra.sem ? ' sem-' + extra.sem : '') + '">' +
+          '<span class="kpi-m-chip">◎</span>' +
+          '<span class="kpi-m-nom">' + esc(extra.nombre) + '</span>' +
+          '<span class="kpi-m-val">' +
+          (extra.valor === null ? 'sin dato' : esc(extra.valor)) + '</span>' +
+          '<span class="kpi-m-meta">' + esc(extra.meta) + '</span></div>';
+      }
       h += '</div></div>';
       kpis.forEach(function (k) {
         h += '<div class="detalle" id="det-kv-' + self._id(k.kpi) + '"></div>';
@@ -7460,6 +7473,10 @@ window.REGISTRO = {};
       var self = this;
       var KA = ((M.crm || {}).kpis_asesor) || {};
       var MET = D.metas_asesor || {};
+      var leadsMarketing = (KA.asesores || []).reduce(function (total, a) {
+        return total + (Number(a.leads) || 0);
+      }, 0);
+      var metaLeadsPropios = Math.ceil(leadsMarketing * 0.1);
       if (!KA.hay || !(KA.asesores || []).length) {
         return '<div class="d-lienzo"><div class="d-carta">' +
           '<div class="d-cifra">—</div>' +
@@ -7624,7 +7641,6 @@ window.REGISTRO = {};
       };
 
 
-      var AX = (M.asesores_axion || {});
       var _rankAx = function (titulo, sub, valor, texto) {
         var vivos = (AX.asesores || []).filter(function (x) {
           return valor(x) !== null && valor(x) !== undefined; });
@@ -7655,6 +7671,49 @@ window.REGISTRO = {};
         }
         return h2 + '</div>';
       };
+      var _rankPropios = function () {
+        var vivos = (AX.asesores || []).slice().sort(function (a, b) {
+          return (Number(b.leads_propios) || 0) - (Number(a.leads_propios) || 0);
+        });
+        var max = Math.max(1, metaLeadsPropios);
+        vivos.forEach(function (x) {
+          max = Math.max(max, Number(x.leads_propios) || 0);
+        });
+        var sub = leadsMarketing > 0
+          ? 'meta ' + ent(metaLeadsPropios) + ' leads por asesor · 10% de ' +
+            ent(leadsMarketing) + ' leads asignados por Marketing · AXION'
+          : 'sin leads asignados por Marketing para calcular la meta del período';
+        var h2 = '<div class="tarjeta" style="padding:var(--e4) var(--e2)">' +
+          '<span class="overline" style="padding:0 var(--e2)">Generación de Leads Propios</span>' +
+          '<p class="d-sub" style="padding:0 var(--e2);margin:2px 0 0">' + esc(sub) + '</p>';
+        if (!vivos.length) {
+          return h2 + '<div class="hueco-kpi"><b>NO HAY DATOS</b>' +
+            '<span>(ningún asesor tiene leads propios cargados en AXION)</span>' +
+            '<span class="ob-sub">Comercial</span></div></div>';
+        }
+        h2 += '<table class="grafico-pb"><tbody>';
+        vivos.forEach(function (x) {
+          var conocido = x.leads_propios !== null && x.leads_propios !== undefined;
+          var propios = Number(x.leads_propios) || 0;
+          var cumple = leadsMarketing > 0 && conocido && propios >= metaLeadsPropios;
+          var pct = leadsMarketing > 0 && conocido
+            ? fmt1(100 * propios / metaLeadsPropios) + '%'
+            : '—';
+          var barra = conocido
+            ? '<span class="' + (cumple ? 'b-ok' : 'b-mal') +
+              '" style="width:' + Math.max(2, Math.min(100,
+                Math.round(100 * propios / max))) + '%"></span>'
+            : '';
+          h2 += '<tr><td class="pb-nom" title="' + esc(x.asesor) + '">' +
+            esc(x.asesor) + '</td>' +
+            '<td class="pb-barra">' + barra + '</td>' +
+            '<td class="pb-cif">' + (conocido ? ent(propios) : 'Sin dato') +
+            '<span class="ob-sub">' + (leadsMarketing > 0
+              ? 'meta ' + ent(metaLeadsPropios) + ' · ' + pct + ' de cumplimiento'
+              : 'meta no disponible') + '</span></td></tr>';
+        });
+        return h2 + '</tbody></table></div>';
+      };
 
       var ixDe = {};
       filas.forEach(function (f, i) { ixDe[f.a.responsable] = i; });
@@ -7668,7 +7727,65 @@ window.REGISTRO = {};
       };
 
       var VK = (window.REGISTRO || {})["ventas-kpi"];
-      if (VK && VK._diezHtml) h += VK._diezHtml(M, D);
+      var AX = M.asesores_axion || {};
+      var kpiPropios = null;
+      if (leadsMarketing > 0) {
+        if (ASESOR) {
+          var propiosSeleccionado = (AX.asesores || []).filter(function (x) {
+            return VK && VK._mismo
+              ? VK._mismo(x.asesor, ASESOR)
+              : norm(x.asesor) === norm(ASESOR);
+          }).filter(function (x) {
+            return x.leads_propios !== null && x.leads_propios !== undefined;
+          }).reduce(function (total, x) {
+            return total + (Number(x.leads_propios) || 0);
+          }, 0);
+          var hayPropiosSeleccionado = (AX.asesores || []).some(function (x) {
+            return (VK && VK._mismo
+              ? VK._mismo(x.asesor, ASESOR)
+              : norm(x.asesor) === norm(ASESOR)) &&
+              x.leads_propios !== null && x.leads_propios !== undefined;
+          });
+          kpiPropios = {
+            valor: hayPropiosSeleccionado
+              ? fmt1(100 * propiosSeleccionado / metaLeadsPropios) + '%'
+              : null,
+            meta: 'cumplimiento · meta ' + ent(metaLeadsPropios) +
+              ' leads por asesor (10% de ' + ent(leadsMarketing) + ' de Marketing)',
+            sem: hayPropiosSeleccionado
+              ? (propiosSeleccionado >= metaLeadsPropios ? 'ok' : 'mal')
+              : ''
+          };
+        } else {
+          var propiosConDato = (AX.asesores || []).filter(function (x) {
+            return x.leads_propios !== null && x.leads_propios !== undefined;
+          });
+          var propiosCumplen = propiosConDato.filter(function (x) {
+            return Number(x.leads_propios) >= metaLeadsPropios;
+          }).length;
+          kpiPropios = {
+            valor: propiosConDato.length
+              ? ent(propiosCumplen) + ' / ' + ent(propiosConDato.length)
+              : null,
+            meta: (propiosConDato.length
+              ? 'asesores con dato que cumplen'
+              : 'sin datos de leads propios en AXION') +
+              ' · meta ' + ent(metaLeadsPropios) + ' leads por asesor (10% de ' +
+              ent(leadsMarketing) + ' de Marketing)',
+            sem: propiosConDato.length
+              ? (propiosCumplen === propiosConDato.length ? 'ok' : 'mal')
+              : ''
+          };
+        }
+      } else {
+        kpiPropios = {
+          valor: null,
+          meta: 'sin leads asignados por Marketing para calcular la meta del período',
+          sem: ''
+        };
+      }
+      kpiPropios.nombre = 'Generación de Leads Propios';
+      if (VK && VK._diezHtml) h += VK._diezHtml(M, D, kpiPropios);
 
       h += '<div class="rejilla-3" style="margin-bottom:var(--e4)">' +
         _rank('Tiempo de 1ª respuesta', MET.respuesta_min,
@@ -7704,10 +7821,7 @@ window.REGISTRO = {};
           function (x) { return x.pct_visitas; },
           function (x) { return fmt1(x.pct_visitas) + '%' +
             '<span class="ob-sub"> ' + ent(x.visitas) + ' de ' + ent(x.agendas) + '</span>'; }) +
-        _rankAx('Leads propios · AXION',
-          'los que el asesor trajo, no los que le asignaron',
-          function (x) { return x.leads_propios; },
-          function (x) { return ent(x.leads_propios); }) +
+        _rankPropios() +
         '</div>';
 
       h += '<div class="rejilla-4" style="margin-bottom:var(--e4)">' +
