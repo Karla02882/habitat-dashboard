@@ -114,6 +114,72 @@ window.HOJA = {
               vlist: p ? p.v : [],
               ticket: (p && p.n) ? p.s / p.n : null};
     });
+    var matchAsesor = function (a, b) {
+      var na = norm(a), nb = norm(b);
+      if (!na || !nb) return 0;
+      if (na === nb) return 1000;
+      var ta = toks(na), tb = toks(nb), comun = 0;
+      ta.forEach(function (x) { if (tb.indexOf(x) >= 0) comun++; });
+      var wa = na.split(" "), wb = nb.split(" ");
+      return comun >= 2 && (wb.indexOf(wa[0]) >= 0 || wa.indexOf(wb[0]) >= 0)
+        ? comun : 0;
+    };
+    var activos = (D.asesores_activos || []).map(function (x) {
+      return String(x || "").trim();
+    }).filter(function (x) { return !!x; });
+    var ventasActivas = {};
+    activos.forEach(function (nombre) {
+      ventasActivas[nombre] = [];
+    });
+    var ventasSinCruce = 0;
+    Object.keys(plata).forEach(function (vendedor) {
+      var candidatos = activos.map(function (nombre) {
+        return {nombre: nombre, score: matchAsesor(vendedor, nombre)};
+      }).filter(function (x) { return x.score > 0; })
+        .sort(function (a, b) { return b.score - a.score; });
+      if (!candidatos.length ||
+          (candidatos.length > 1 && candidatos[0].score === candidatos[1].score)) {
+        ventasSinCruce += plata[vendedor].n;
+        return;
+      }
+      ventasActivas[candidatos[0].nombre] =
+        ventasActivas[candidatos[0].nombre].concat(plata[vendedor].v);
+    });
+    var metaVentas = MET.ventas || {};
+    var composicionVentas = metaVentas.composicion || {};
+    var metaVentasTotal = Number(metaVentas.meta);
+    var metaLotes = Number(composicionVentas.lotes);
+    var metaVivienda = Number(composicionVentas.departamento_o_casa);
+    var ventasMetaDisponible = !!metaVentas &&
+      isFinite(metaVentasTotal) && metaVentasTotal > 0 &&
+      isFinite(metaLotes) && metaLotes > 0 &&
+      isFinite(metaVivienda) && metaVivienda > 0;
+    var ventasPorAsesorActivo = activos.map(function (nombre) {
+      var unidades = ventasActivas[nombre] || [];
+      var lotes = 0, vivienda = 0;
+      unidades.forEach(function (v) {
+        var u = norm(v.unidad);
+        if (u.indexOf("LOTE") === 0) lotes++;
+        else if (u.indexOf("DPTO") === 0 || u.indexOf("DEPTO") === 0 ||
+                 u.indexOf("DEPARTAMENTO") === 0 || u.indexOf("DEPA") === 0 ||
+                 u.indexOf("CASA") === 0) vivienda++;
+      });
+      var avance = ventasMetaDisponible
+        ? 100 * (Math.min(lotes, metaLotes) + Math.min(vivienda, metaVivienda)) /
+          metaVentasTotal
+        : null;
+      return {
+        asesor: nombre, ventas: unidades.length, lotes: lotes, vivienda: vivienda,
+        avance: avance,
+        cumple: ventasMetaDisponible && unidades.length >= metaVentasTotal &&
+          lotes >= metaLotes && vivienda >= metaVivienda
+      };
+    });
+    if (ASESOR) {
+      ventasPorAsesorActivo = ventasPorAsesorActivo.filter(function (x) {
+        return matchAsesor(x.asesor, ASESOR) > 0;
+      });
+    }
     var dobleU = [];
     dobles.forEach(function (x) { if (dobleU.indexOf(x) < 0) dobleU.push(x); });
     var sinCRM = Object.keys(plata).filter(function (k) { return !usados[k]; })
@@ -129,14 +195,14 @@ window.HOJA = {
 
     var h = '<div class="d-lienzo">';
 
-    var tLeads = 0, tVentas = 0, tMonto = 0, cumplen = 0, conMeta = 0;
+    var tLeads = 0, tVentas = 0, tMonto = 0, cumplen = 0;
     var respL = [];
     filas.forEach(function (f) {
       tLeads += f.a.leads; tVentas += f.ventasAx; tMonto += (f.monto || 0);
       if (f.a.respuesta_min !== null && f.a.respuesta_min !== undefined)
         respL.push(f.a.respuesta_min);
-      if (MET.ventas) { conMeta++; if (f.ventasAx >= MET.ventas.meta) cumplen++; }
     });
+    ventasPorAsesorActivo.forEach(function (f) { if (f.cumple) cumplen++; });
     respL.sort(function (x, y) { return x - y; });
     var dur = function (m) {
       if (m === null || m === undefined) return '—';
@@ -149,13 +215,17 @@ window.HOJA = {
       : null;
 
     h += '<div class="d-kpis">' +
-      '<div class="d-carta d-kpi-saldo"><div class="d-cab">' +
+      '<div class="d-carta d-kpi-saldo d-abrible abrible" data-abre="as-meta-ventas" ' +
+      'aria-expanded="false" tabindex="0" role="button"><div class="d-cab">' +
         '<span class="d-chip">◍</span><span class="d-preg">¿Cuántos llegan a la meta?</span></div>' +
-        '<div class="d-cifra">' + ent(cumplen) + ' de ' + ent(filas.length) + '</div>' +
-        '<div class="d-exacta">' + (MET.ventas
-          ? 'meta ' + ent(MET.ventas.meta) + ' ventas por asesor' : 'sin meta cargada') + '</div>' +
-        '<div class="d-pie">' + ent(tVentas + (ASESOR ? 0 : sinCRMn)) +
-        ' contratos firmados · AXION</div></div>' +
+        '<div class="d-cifra">' + (ventasMetaDisponible
+          ? ent(cumplen) + ' de ' + ent(ventasPorAsesorActivo.length) : '—') + '</div>' +
+        '<div class="d-exacta">' + (ventasMetaDisponible
+          ? 'meta ' + ent(metaVentasTotal) + ' ventas: ' + ent(metaLotes) +
+            ' lotes + ' + ent(metaVivienda) + ' departamento y/o casa'
+          : 'meta o lista de asesores activos no disponible') + '</div>' +
+        '<div class="d-pie">' + ent(ASESOR ? ventasPorAsesorActivo.length : activos.length) +
+        ' asesores activos · clic para ver el avance</div></div>' +
       '<div class="d-carta"><div class="d-cab">' +
         '<span class="d-chip">⏱</span><span class="d-preg">¿Qué tan rápido responden?</span></div>' +
         '<div class="d-cifra' + (MET.respuesta_min && respMed !== null && respMed > MET.respuesta_min.meta
@@ -188,6 +258,7 @@ window.HOJA = {
              : 'sin meta cargada')) + '</div></div>' +
       '</div>' +
       '<div class="detalle" id="det-as-cruce"></div>' +
+      '<div class="detalle" id="det-as-meta-ventas"></div>' +
       '<div class="detalle" id="det-as-seg"></div>';
 
     var _rank = function (titulo, meta, sub, valOf, txtOf, menorMejor, abre) {
@@ -431,6 +502,12 @@ window.HOJA = {
       });
     });
     this._filas = filas;
+    this._ventasPorAsesorActivo = ventasPorAsesorActivo;
+    this._ventasMetaConfig = {
+      total: metaVentasTotal, lotes: metaLotes, vivienda: metaVivienda,
+      disponible: ventasMetaDisponible
+    };
+    this._ventasSinCruce = ventasSinCruce;
     this._leadsMarketing = leadsMarketing;
     this._metaLeadsPropios = metaLeadsPropios;
     this._asesoresPropios = AX.asesores || [];
@@ -453,6 +530,52 @@ window.HOJA = {
     }
     if (String(id).indexOf("as-") !== 0) return null;
     var NE = "No existe";
+    if (id === "as-meta-ventas") {
+      var configVentas = this._ventasMetaConfig || {};
+      var filasMeta = (this._ventasPorAsesorActivo || []).slice().sort(function (a, b) {
+        return Number(b.cumple) - Number(a.cumple) ||
+          (b.avance || 0) - (a.avance || 0) ||
+          String(a.asesor).localeCompare(String(b.asesor));
+      });
+      var detalleMeta = '<button class="cerrar">Cerrar</button>' +
+        '<h3>Meta de ventas · por asesor</h3>' +
+        '<p class="d-sub">' + (configVentas.disponible
+          ? 'Meta: ' + ent(configVentas.total) + ' ventas · ' +
+            ent(configVentas.lotes) + ' lotes y ' + ent(configVentas.vivienda) +
+            ' departamento y/o casa.'
+          : 'La meta o la lista de asesores activos no está disponible.') +
+        '</p><div class="envoltura-tabla"><table class="datos"><thead><tr>' +
+        '<th>Asesor activo</th><th class="num">Lotes</th>' +
+        '<th class="num">Departamento / casa</th><th class="num">Ventas</th>' +
+        '<th class="num">Avance</th><th>Estado</th></tr></thead><tbody>';
+      if (!filasMeta.length) {
+        detalleMeta += '<tr><td class="obra" colspan="6">No hay asesores activos en este período.</td></tr>';
+      }
+      filasMeta.forEach(function (f) {
+        var avanceTexto = configVentas.disponible
+          ? fmt1(f.avance) + '%' : '—';
+        var estado = !configVentas.disponible
+          ? '<span class="d-tag espera">Sin meta</span>'
+          : (f.cumple
+            ? '<span class="d-tag ok">Cumple</span>'
+            : '<span class="d-tag mal">En avance</span>');
+        detalleMeta += '<tr><td class="obra">' + esc(f.asesor) + '</td>' +
+          '<td class="num">' + ent(f.lotes) + ' / ' +
+          (configVentas.disponible ? ent(configVentas.lotes) : '—') + '</td>' +
+          '<td class="num">' + ent(f.vivienda) + ' / ' +
+          (configVentas.disponible ? ent(configVentas.vivienda) : '—') + '</td>' +
+          '<td class="num">' + ent(f.ventas) + ' / ' +
+          (configVentas.disponible ? ent(configVentas.total) : '—') + '</td>' +
+          '<td class="num">' + avanceTexto + '</td><td>' + estado + '</td></tr>';
+      });
+      detalleMeta += '</tbody></table></div>';
+      if (this._ventasSinCruce) {
+        detalleMeta += '<p class="mas">' + ent(this._ventasSinCruce) +
+          ' ventas de AXION no se pudieron asociar de forma inequívoca a un asesor activo; ' +
+          'no se incluyeron en el avance individual.</p>';
+      }
+      return detalleMeta;
+    }
     if (id === "as-propios") {
       var asignados = this._leadsMarketing || 0;
       var metaPropios = this._metaLeadsPropios || 0;

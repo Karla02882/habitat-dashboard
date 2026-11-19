@@ -25,11 +25,11 @@
   },
   "Ventas cerradas": {
     "escala": "por_asesor",
-    "meta": 5,
+    "meta": 4,
     "mejor": "mayor",
-    "ambar": 4,
+    "ambar": 3,
     "unidad": "n",
-    "de": "tabla del jefe de comercial · por asesor"
+    "de": "4 ventas por cada asesor activo"
   },
   "Leads calificados": {
     "escala": "igual",

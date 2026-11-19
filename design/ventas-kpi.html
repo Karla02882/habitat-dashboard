@@ -49,7 +49,8 @@ window.HOJA = {
   _meta: function (kpi, nAsesores) {
     var m = (this._MET || {})[kpi];
     if (!m) return null;
-    if (ASESOR || m.escala !== "por_asesor" || !nAsesores) return m;
+    if (ASESOR || m.escala !== "por_asesor") return m;
+    if (!nAsesores) return null;
     var e = {};
     Object.keys(m).forEach(function (k) { e[k] = m[k]; });
     e.meta = m.meta * nAsesores;
@@ -174,8 +175,7 @@ window.HOJA = {
     this._contratos = [].concat.apply([], ((M.estructura || {}).modalidad || [])
       .map(function (mo) { return mo.detalle || []; }));
 
-    var nAses = 0;
-    piezas.forEach(function (x) { if (x.leads > 0) nAses++; });
+    var nAses = (D.asesores_activos || []).length;
     this._nAses = nAses;
 
     var conMeta = 0, cumplen = 0, conDato = 0;
@@ -198,7 +198,7 @@ window.HOJA = {
       '<span class="d-preg">¿Llega a la meta?</span></div>' +
       '<div class="d-cifra">' + ent(cumplen) + ' de ' + ent(conMeta) + '</div>' +
       '<div class="d-exacta">' + (ASESOR ? esc(ASESOR)
-        : 'el equipo · ' + ent(nAses) + ' asesores con leads') + '</div>' +
+        : 'el equipo · ' + ent(nAses) + ' asesores activos') + '</div>' +
       '<div class="d-pie">' + ent(conDato) + ' de ' + ent(kpis.length) +
       ' KPI con fuente · clic para el detalle</div></div>';
 
@@ -258,8 +258,7 @@ window.HOJA = {
     this._suyasN = suyas.map(function (x) { return String(x.asesor).toUpperCase(); });
     this._contratos = [].concat.apply([], ((M.estructura || {}).modalidad || [])
       .map(function (mo) { return mo.detalle || []; }));
-    var nAses = 0;
-    piezas.forEach(function (x) { if (x.leads > 0) nAses++; });
+    var nAses = (D.asesores_activos || []).length;
     this._nAses = nAses;
     var conMeta = 0, cumplen = 0, conDato = 0;
     kpis.forEach(function (k) {
@@ -278,7 +277,7 @@ window.HOJA = {
         : ent(conDato) + ' con fuente') +
       ' · ' + ent(cumplen) + ' de ' + ent(conMeta) +
       (extra ? ' metas de ventas' : ' en meta') +
-      (ASESOR ? '' : ' · metas de conteo × ' + ent(nAses) + ' asesores') +
+      (ASESOR ? '' : ' · metas de conteo × ' + ent(nAses) + ' asesores activos') +
       (!ASESOR && fuera.ventas
         ? ' · ' + ent(fuera.ventas) + ' ventas de AXION sin usuario del CRM'
         : '') + '</p>' +

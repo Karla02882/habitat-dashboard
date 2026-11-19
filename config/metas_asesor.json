@@ -33,7 +33,11 @@
     "ambar": 3,
     "rotulo": "Ventas cerradas",
     "unidad": "n",
-    "desglose": "2 lotes · 1 depa · 1 casa u oficina"
+    "desglose": "3 lotes · 1 departamento y/o casa",
+    "composicion": {
+      "lotes": 3,
+      "departamento_o_casa": 1
+    }
   },
   "monto": {
     "meta": 450000,
